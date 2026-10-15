@@ -1400,28 +1400,29 @@ function clubProfile(club, loft) {
   return { head, le, ft, hosel: [[hx - 0.3, 0.6], [hx + 0.24, 0.6], [hx + 0.2, 3.1], [hx - 0.2, 3.1]], shaft: [[hx, 3.0], [hx, 40]] };
 }
 // ---- release kinematics: face-on downswing, swing plane flattened. Lead shoulder (hub) -> lead arm -> wrist hinge -> club ----
-// Inches, x toward target from the ball, y up from the hub. Arm angle p from straight down (+ toward target).
+// Inches, x toward target from the ball, y up from the hub's address height. Arm angle p from straight down (+ toward target).
 // Wrist hinge h = angle the shaft trails the arm; it releases along a logistic curve and reaches 0 (arm and shaft in line) at the release point.
-const REL = { La: 24, f: 0.88, k: 20, hLag: 90, A: -45, shift: 4, p0: -120, p1: 150, dp: 0.1, depth: -0.25 };
-const REL_PRE = { tour: { pivot: 2, relX: 9.5 }, scoop: { pivot: 2, relX: -6 }, hang: { pivot: -2, relX: 9.5 }, both: { pivot: -2, relX: -6 } };
+// Swing inputs o: rel = hands vs lead shoulder when arm and shaft line up, shift = how far the lead shoulder moves toward the target
+// in the downswing, bp = ball position vs stance center, dh = shoulder height change through impact (+ stands up), hinge = wrist hinge at the top.
+const REL = { La: 24, f: 0.88, k: 20, A: -45, top: -2, p0: -120, p1: 150, dp: 0.1, depth: -0.25, early: 0.2 };
+const REL_BASE = { rel: 7.5, shift: 4, bp: 0, dh: 0, hinge: 90 };
+const REL_PRE = { tour: { ...REL_BASE }, scoop: { ...REL_BASE, rel: -7 }, hang: { ...REL_BASE, shift: 0 }, both: { ...REL_BASE, rel: -7, shift: 0 } };
 const REL_N = Math.round((REL.p1 - REL.p0) / REL.dp);
 // playback clock: slow motion through the impact zone
 const REL_T = (() => { const c = [0]; for (let i = 1; i <= REL_N; i++) { const p = REL.p0 + (i - 0.5) * REL.dp; c.push(c[i - 1] + 1 + 3 * Math.exp(-(((p - 5) / 20) ** 2))); } return c.map(x => x / c[REL_N]); })();
 const relIdx = t => { let lo = 0, hi = REL_N; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (REL_T[m] <= t) lo = m; else hi = m; } return lo; };
 const smooth01 = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
-const relHub = (p, pivot) => pivot - REL.shift * (1 - smooth01((p - REL.p0) / 150));   // pressure shift moves the shoulder toward the target
-// arm angle at which the hands reach x (in vs ball)
-function relPhiAt(x, pivot) { let a = -85, b = 70; for (let i = 0; i < 40; i++) { const m = (a + b) / 2; if (relHub(m, pivot) + REL.La * Math.sin(m * D2R) < x) a = m; else b = m; } return (a + b) / 2; }
 const relCache = new Map();
-function relRaw(club, pivot, relX) {
-  const key = `${club}|${pivot}|${relX}`; if (relCache.has(key)) return relCache.get(key);
-  const { La, k, hLag, A } = REL, Lc = CLUBS[club].len * REL.f, pr = relPhiAt(relX, pivot);
-  const c = pr - k * Math.log((hLag - A) / -A - 1), hOf = p => A + (hLag - A) / (1 + Math.exp((p - c) / k));
-  const r = { ph: [], ps: [], ux: [], hx: [], hy: [], cx: [], cy: [] };
+function relRaw(club, o) {
+  const key = [club, o.rel, o.shift, o.bp, o.dh, o.hinge].join('|'); if (relCache.has(key)) return relCache.get(key);
+  const { La, k, A } = REL, Lc = CLUBS[club].len * REL.f, pr = Math.asin(clamp(o.rel / La, -0.95, 0.95)) * R2D;
+  const c = pr - k * Math.log((o.hinge - A) / -A - 1), hOf = p => A + (o.hinge - A) / (1 + Math.exp((p - c) / k));
+  const r = { ph: [], ps: [], ux: [], uy: [], hx: [], hy: [], cx: [], cy: [], stance: -o.bp };
   for (let i = 0; i <= REL_N; i++) {
-    const p = REL.p0 + i * REL.dp, s = p - hOf(p), ux = relHub(p, pivot);
-    const ax = ux + La * Math.sin(p * D2R), ay = -La * Math.cos(p * D2R);
-    r.ph.push(p); r.ps.push(s); r.ux.push(ux); r.hx.push(ax); r.hy.push(ay); r.cx.push(ax + Lc * Math.sin(s * D2R)); r.cy.push(ay - Lc * Math.cos(s * D2R));
+    const p = REL.p0 + i * REL.dp, s = p - hOf(p);
+    const ux = -o.bp + REL.top + o.shift * smooth01((p - REL.p0) / 150), uy = o.dh * smooth01((p + 60) / 80);
+    const ax = ux + La * Math.sin(p * D2R), ay = uy - La * Math.cos(p * D2R);
+    r.ph.push(p); r.ps.push(s); r.ux.push(ux); r.uy.push(uy); r.hx.push(ax); r.hy.push(ay); r.cx.push(ax + Lc * Math.sin(s * D2R)); r.cy.push(ay - Lc * Math.cos(s * D2R));
   }
   let iMinX = 0; for (let i = 0; i < REL_N / 2; i++) if (r.cx[i] < r.cx[iMinX]) iMinX = i;
   let iImp = iMinX; while (iImp < REL_N && r.cx[iImp] < -BALL_IN) iImp++;   // leading edge reaches the back of the ball
@@ -1430,18 +1431,19 @@ function relRaw(club, pivot, relX) {
   Object.assign(r, { iMinX, iImp, iLow, minY: r.cy[iLow] });
   relCache.set(key, r); return r;
 }
-// full result with posture (hub height) and strike
-function relSim(club, pivot, relX, mode) {
-  const r = relRaw(club, pivot, relX), t = REL_PRE.tour, Y0 = REL.depth - relRaw(club, t.pivot, t.relX).minY;
+// full result with posture (hub height set so the tour swing bottoms at REL.depth) and strike
+function relSim(club, o, mode) {
+  const r = relRaw(club, o), Y0 = REL.depth - relRaw(club, REL_BASE).minY;
   const i = r.iImp, a = i - 1, fr = (-BALL_IN - r.cx[a]) / (r.cx[i] - r.cx[a]), at = arr => arr[a] + (arr[i] - arr[a]) * fr;
-  const entryAt = Y => { for (let j = r.iMinX; j < i; j++) if (r.cy[j] + Y < 0) return -r.cx[j]; return 0; };
+  // turf travelled before the leading edge reaches the back of the ball
+  const earlyAt = Y => { for (let j = r.iMinX; j < i; j++) if (r.cy[j] + Y < 0) return -BALL_IN - r.cx[j]; return 0; };
   let Y = Y0;
-  if (mode === 'save' && entryAt(Y) > 0.5) { let lo = Y0, hi = Y0 + 6; for (let n = 0; n < 30; n++) { const m = (lo + hi) / 2; if (entryAt(m) > 0.5) lo = m; else hi = m; } Y = hi; }
-  const entry = entryAt(Y), sole = at(r.cy) + Y;
-  const kind = sole > BALL_IN - 0.12 ? 'top' : entry > 0.5 ? 'fat' : BALL_IN - (sole + 0.79) < -0.25 ? 'thin' : 'clean';
+  if (mode === 'save' && earlyAt(Y) > REL.early) { let lo = Y0, hi = Y0 + 8; for (let n = 0; n < 30; n++) { const m = (lo + hi) / 2; if (earlyAt(m) > REL.early) lo = m; else hi = m; } Y = hi; }
+  const early = earlyAt(Y), sole = at(r.cy) + Y;
+  const kind = sole > BALL_IN - 0.12 ? 'top' : early > REL.early ? 'fat' : BALL_IN - (sole + 0.79) < -0.25 ? 'thin' : 'clean';
   let d0 = -1, d1 = -1; for (let j = r.iMinX; j < REL_N; j++) { if (r.cy[j] + Y < 0) { if (d0 < 0) d0 = j; d1 = j; } else if (d0 >= 0) break; }
   const aoa = Math.atan2(r.cy[i] - r.cy[a], r.cx[i] - r.cx[a]) * R2D, ps = at(r.ps);
-  return { ...r, Y, lift: Y - Y0, entry, sole, kind, d0, d1, aoa, lean: -ps, handX: at(r.hx), lag: at(r.ph) - ps,
+  return { ...r, Y, lift: Y - Y0, early, sole, kind, d0, d1, aoa, lean: -ps, handX: at(r.hx), shoulderX: at(r.ux), lag: at(r.ph) - ps,
     lp: r.cx[r.iLow], bottom: r.minY + Y, dl: CLUBS[club].loft + ps, tImp: REL_T[i] };
 }
 // ---- widget framework ----
@@ -1772,11 +1774,14 @@ const WIDGETS = {
     controls: [
       { key: 'club', label: 'Club', options: { '7i': '7 iron (32°)', '5i': '5 iron (26°)', pw: 'PW (46°)' }, init: '7i' },
       { key: 'mode', label: 'If the arc bottoms early', options: { fixed: 'Same posture (digs)', save: 'Lifts to miss the turf' }, init: 'fixed' },
-      { key: 'relX', label: 'Arm & shaft line up (hands vs ball)', min: -14, max: 14, step: 0.5, init: REL_PRE.tour.relX, unit: ' in', signed: true },
-      { key: 'pivot', label: 'Lead shoulder at impact (vs ball)', min: -3, max: 6, step: 0.25, init: REL_PRE.tour.pivot, unit: ' in', signed: true, dec: 2 },
+      { key: 'rel', label: 'Release point (hands vs lead shoulder)', min: -14, max: 14, step: 0.5, init: REL_BASE.rel, unit: ' in', signed: true },
+      { key: 'shift', label: 'Shoulder shift toward target (downswing)', min: 0, max: 8, step: 0.25, init: REL_BASE.shift, unit: ' in', dec: 2 },
+      { key: 'bp', label: 'Ball position (+ forward in stance)', min: -3, max: 3, step: 0.25, init: REL_BASE.bp, unit: ' in', signed: true, dec: 2 },
+      { key: 'dh', label: 'Shoulder height through impact (+ stands up)', min: -2, max: 2, step: 0.05, init: REL_BASE.dh, unit: ' in', signed: true, dec: 2 },
+      { key: 'hinge', label: 'Wrist hinge at the top', min: 50, max: 110, step: 1, init: REL_BASE.hinge, unit: '°', dec: 0 },
       { key: 't', label: 'Swing position', min: 0, max: 1, step: 0.001, init: 1, fmt: v => { const p = REL.p0 + relIdx(v) * REL.dp; return p < -95 ? 'Top' : p < -12 ? 'Downswing' : p < 25 ? 'Impact zone' : 'Follow-through'; } },
     ],
-    caption: 'Face-on with the swing plane flattened. Left: the whole swing (blue = clubhead path, dashed = hands). Right: impact zone to scale. Dynamic loft ≈ static loft − shaft lean. Faint dashed path = tour release for comparison.',
+    caption: 'Face-on with the swing plane flattened. Left: the whole swing (blue = clubhead path, dashed = hands, tick = stance center). Right: impact zone to scale. Dynamic loft ≈ static loft − shaft lean. Faint dashed path = tour release for comparison.',
     mount({ el, vals, set, draw, live }) {
       const bar = document.createElement('div'); bar.className = 'wbtns';
       bar.innerHTML = `<button data-a="play">▶ Play</button><button data-a="imp">Impact</button><span class="sep"></span><span>Try:</span>
@@ -1790,12 +1795,12 @@ const WIDGETS = {
         if (t >= 1) stop(); else raf = requestAnimationFrame(tick);
       };
       pb.onclick = () => { if (raf) return stop(); if (vals.t >= 0.999) vals.t = 0; pb.textContent = '❚❚ Pause'; last = performance.now(); raf = requestAnimationFrame(tick); };
-      bar.querySelector('[data-a="imp"]').onclick = () => { stop(); set({ t: relSim(vals.club, vals.pivot, vals.relX, vals.mode).tImp }); };
+      bar.querySelector('[data-a="imp"]').onclick = () => { stop(); set({ t: relSim(vals.club, vals, vals.mode).tImp }); };
       bar.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { stop(); set({ ...REL_PRE[b.dataset.p], t: 1 }); });
     },
     draw(ctx, w, h, v) {
-      const r = relSim(v.club, v.pivot, v.relX, v.mode), T = REL_PRE.tour, ref = relSim(v.club, T.pivot, T.relX, 'fixed');
-      const isRef = v.pivot === T.pivot && v.relX === T.relX;
+      const r = relSim(v.club, v, v.mode), ref = relSim(v.club, REL_BASE, 'fixed');
+      const isRef = Object.keys(REL_BASE).every(k => v[k] === REL_BASE[k]);
       const i = relIdx(v.t), Y = r.Y, past = i >= r.iImp;
       const m = learnModel(v.club, { aoa: r.aoa, dl: clamp(r.dl, 4, 65) });
       const range = (a, b, step, f) => { const o = []; for (let j = a; j <= b; j += step) o.push(f(j)); return o; };
@@ -1808,14 +1813,15 @@ const WIDGETS = {
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, lw, h); ctx.clip();
       ctx.fillStyle = '#1a2a1e'; ctx.fillRect(0, gy, lw, h - gy); line(ctx, [[0, gy], [lw, gy]], '#4f7a59', 1.5);
       // golfer (simple figure, moves with the pivot)
-      const ux = r.ux[i], body = '#3b4943', bw = Math.max(2.5, 1.4 * sc);
-      const neck = [ux - 7.5, Y + 2], hips = [ux - 4, Y - 23], lh = [ux - 0.5, Y - 23], th = [ux - 8, Y - 23];
+      const ux = r.ux[i], uy = Y + r.uy[i], body = '#3b4943', bw = Math.max(2.5, 1.4 * sc), st = r.stance;
+      const neck = [ux - 7.5, uy + 2], hips = [ux - 4, uy - 23], lh = [ux - 0.5, uy - 23], th = [ux - 8, uy - 23];
       line(ctx, [S(...hips), S(...neck)], body, bw * 1.6);
-      line(ctx, [S(ux - 15, Y - 1), S(ux, Y)], body, bw);
-      line(ctx, [S(...lh), S(ux + 2, Y - 37), S(7, 0)], body, bw * 1.2);
-      line(ctx, [S(...th), S(-9, Y - 38), S(-13, 0)], body, bw * 1.2);
-      ctx.fillStyle = body; ctx.beginPath(); ctx.arc(...S(ux - 8.5, Y + 10), 4.5 * sc, 0, 7); ctx.fill();
-      line(ctx, [S(ux - 15, Y - 1), S(r.hx[i], r.hy[i] + Y)], body, bw);   // trail arm
+      line(ctx, [S(ux - 15, uy - 1), S(ux, uy)], body, bw);
+      line(ctx, [S(...lh), S((ux + 2 + st + 8) / 2 + 1, uy - 37), S(st + 8, 0)], body, bw * 1.2);
+      line(ctx, [S(...th), S((ux - 8 + st - 10) / 2 - 2, uy - 38), S(st - 10, 0)], body, bw * 1.2);
+      ctx.fillStyle = body; ctx.beginPath(); ctx.arc(...S(ux - 8.5, uy + 10), 4.5 * sc, 0, 7); ctx.fill();
+      line(ctx, [S(ux - 15, uy - 1), S(r.hx[i], r.hy[i] + Y)], body, bw);   // trail arm
+      line(ctx, [S(st, -1), S(st, 2.5)], 'rgba(228,235,231,0.35)', 1.5);      // stance center
       // paths
       const trace = (s, a, b, xs, ys) => range(a, b, 4, j => S(xs[j], ys[j] + s.Y));
       if (!isRef) line(ctx, trace(ref, 0, REL_N, ref.cx, ref.cy), 'rgba(228,235,231,0.25)', 1.2, [3, 4]);
@@ -1823,10 +1829,10 @@ const WIDGETS = {
       line(ctx, trace(r, 0, REL_N, r.cx, r.cy), 'rgba(74,168,255,0.3)', 1.5);
       line(ctx, trace(r, 0, i, r.cx, r.cy), COL.path, 2);
       // impact pose ghost
-      const ix = r.iImp, gh = [S(r.ux[ix], Y), S(r.hx[ix], r.hy[ix] + Y), S(r.cx[ix], r.cy[ix] + Y)];
+      const ix = r.iImp, gh = [S(r.ux[ix], Y + r.uy[ix]), S(r.hx[ix], r.hy[ix] + Y), S(r.cx[ix], r.cy[ix] + Y)];
       line(ctx, gh, 'rgba(255,212,92,0.45)', 1.5, [5, 4]);
       // current arm + club
-      const sh = S(ux, Y), hd = S(r.hx[i], r.hy[i] + Y), ch = S(r.cx[i], r.cy[i] + Y);
+      const sh = S(ux, uy), hd = S(r.hx[i], r.hy[i] + Y), ch = S(r.cx[i], r.cy[i] + Y);
       line(ctx, [sh, hd], '#c9d1cd', Math.max(3, 1.6 * sc));
       line(ctx, [hd, ch], '#9aa5a0', Math.max(1.5, 0.5 * sc));
       dot2(ctx, hd, Math.max(3, 1.3 * sc), '#e4ebe7'); dot2(ctx, ch, Math.max(3.5, 1.4 * sc), COL.face);
@@ -1862,6 +1868,11 @@ const WIDGETS = {
       if (!isRef) line(ctx, zt(ref, ref.iMinX, REL_N), 'rgba(228,235,231,0.3)', 1.2, [3, 4]);
       line(ctx, zt(r, r.iMinX, REL_N), 'rgba(74,168,255,0.35)', 1.5);
       if (i > r.iMinX) line(ctx, zt(r, r.iMinX, i), COL.path, 2.5);
+      // turf entry
+      if (r.d0 >= 0) {
+        const ex = Math.max(-8.8, r.cx[r.d0]), eq = Z(ex, 0), bad = r.early > 0.05;
+        line(ctx, [[eq[0], zgy - 16], [eq[0], zgy + 2]], bad ? COL.low : COL.muted, 2);
+      }
       // low point
       const lq = Z(r.lp, r.bottom); dot2(ctx, lq, 5, COL.panel); dot2(ctx, lq, 3.5, COL.low);
       line(ctx, [Z(r.lp, r.bottom), Z(r.lp, -1.2)], COL.low, 1.5, [3, 3]);
@@ -1896,6 +1907,7 @@ const WIDGETS = {
       line(ctx, [Z(...sb), Z(...top)], 'rgba(228,235,231,0.35)', 1, [2, 3]);
       label(ctx, `shaft lean at impact ${fmtSigned(r.lean)}°`, rx + 10, 16, COL.start, 'left');
       label(ctx, `impact zone · to scale`, rx + rw - 8, 16, COL.muted, 'right', false);
+      if (r.early > 0.05) label(ctx, `turf ${r.early.toFixed(1)} in before the ball (red tick)`, rx + 10, 40, COL.low, 'left');
       label(ctx, `low point ${fmtSigned(r.lp)} in`, clamp(lq[0], rx + 60, rx + rw - 60), zgy + 46, COL.low, 'center');
       ctx.restore();
 
@@ -1903,11 +1915,12 @@ const WIDGETS = {
       return readout([
         ['Low point', `${fmtSigned(r.lp)} in`, r.lp > 1.5 ? 'good' : r.lp < 0 ? 'bad' : ''],
         ['Hands at impact', `${fmtSigned(r.handX)} in`],
+        ['Lead shoulder at impact', `${fmtSigned(r.shoulderX)} in`],
         ['Shaft lean', `${fmtSigned(r.lean)}°`, r.lean < 0 ? 'bad' : ''],
         ['Hinge left at impact', `${Math.round(r.lag)}°`],
         ['Attack angle', `${fmtSigned(r.aoa)}°`],
         ['Dynamic loft', `${r.dl.toFixed(1)}°`],
-        ['Strike', STRIKE_NAME[r.kind] + (r.kind === 'fat' ? ` (${r.entry.toFixed(1)} in early)` : r.lift > 0.05 ? ` (lifted ${r.lift.toFixed(1)} in)` : ''), good ? 'good' : 'bad'],
+        ['Strike', STRIKE_NAME[r.kind] + (r.kind === 'fat' ? ` (${r.early.toFixed(1)} in before ball)` : r.lift > 0.05 ? ` (lifted ${r.lift.toFixed(1)} in)` : ''), good ? 'good' : 'bad'],
         ['Launch / spin', `${m.vla.toFixed(1)}° · ${Math.round(m.spin).toLocaleString()} rpm`],
       ]);
     },
@@ -2045,17 +2058,20 @@ const TOPICS = [
     <h1>Release, low point & shaft lean</h1>
     <p class="lede">The clubhead bottoms out shortly after the lead arm and shaft line up. Hold the wrist hinge a little longer and that happens after the ball: the low point moves forward and the shaft leans toward the target at impact. Release it early and the clubhead catches the hands before the ball, so the low point moves back and the shaft leans away from the target.</p>
     <div data-widget="release"></div>
-    <h2>Two ways to move the low point</h2>
+    <h2>What moves the low point</h2>
     <ul>
-      <li><b>Release timing</b> (where the arm and shaft line up). Lining them up 2 in later moves the low point about 0.7 in forward and adds about 1.8° of shaft lean. Most of your shaft lean comes from here.</li>
-      <li><b>Pivot</b> (where the lead shoulder is at impact). Moving it 1 in toward the target moves the low point about 0.7 in forward but adds only about 0.5° of lean. The pivot carries the whole arc forward, hands included.</li>
+      <li><b>Release timing</b> (where the hands are, relative to the lead shoulder, when arm and shaft line up). Lining them up 2 in later moves the low point about 0.8 in forward and adds about 1.8° of shaft lean.</li>
+      <li><b>Shoulder shift</b> (how far the lead shoulder moves toward the target in the downswing). Each inch slides the whole arc about 1 in forward and adds about 1.3° of lean, without changing how deep it bottoms out.</li>
+      <li><b>Ball position</b> works the same way in reverse: moving the ball 1.5 in forward leaves the low point 1.5 in closer to it, and the 7 iron goes from clean to about 1 in fat.</li>
+      <li><b>Height change</b> moves the bottom up or down without moving it forward. Dipping 0.5 in takes about 3 in of turf before the ball; standing up 0.5 in catches it thin.</li>
+      <li><b>Wrist hinge at the top</b> matters less than when you release it. Starting with more hinge adds a little lean only if you hold it.</li>
     </ul>
     <h2>Is shaft lean automatic?</h2>
-    <p>Mostly, yes. When the pivot gets the lead shoulder ahead of the ball and some hinge is still left at impact, the hands arrive ahead of the clubhead and the shaft leans forward with no extra effort. In the tour preset the hands are about 5 in ahead of the ball with about 18° of hinge left, which gives about 10° of lean and 22° of dynamic loft on a 32° 7 iron.</p>
-    <p>Both pieces matter. Press <b>Hang back</b>: the hinge is still held, so the shaft still leans about 8°, but with the shoulder behind the ball the low point is only 2 in ahead and the strike comes up thin. Lean without pivot doesn't move the bottom far enough.</p>
+    <p>Mostly, yes. When the shoulder shift gets the swing center ahead of the ball and some hinge is still left at impact, the hands arrive ahead of the clubhead and the shaft leans forward with no extra effort. In the tour preset the lead shoulder is about 2 in ahead of the ball and the hands about 5 in ahead, with about 17° of hinge left. That gives about 10° of lean and 22° of dynamic loft on a 32° 7 iron.</p>
+    <p>Both pieces matter. Press <b>Hang back</b>: the release is unchanged, but with no shift the shoulder stays 2 in behind the ball. Lean drops to about 5°, the low point moves to just ahead of the ball, and the club takes about 3 in of turf first.</p>
     <h2>What scooping does</h2>
-    <p>Scooping (flipping) means the clubhead passes the hands before impact. In the <b>Scoop</b> preset the low point moves from 4.5 in ahead to just behind the ball, the shaft leans about 3° backward, and the 7 iron arrives with about 35° of loft instead of 22°. With the same posture the club reaches the turf about 6–7 in early: fat. A scooper who learns to avoid the ground does it by lifting, which saves the contact and keeps the extra loft: high, weak, spinny shots, and thin ones when the lift overshoots.</p>
-    <div class="callout"><b>Try it:</b> press Play on the tour preset, then on Scoop, and watch the wrist-hinge readout in the top-left. In the tour swing about 18° of hinge is left at impact. In the scoop it is gone before the ball and goes negative as the clubhead passes the hands. Then switch "If the arc bottoms early" to see the fat-or-lift choice a scooper faces.</div>
+    <p>Scooping (flipping) means the clubhead passes the hands before impact. In the <b>Scoop</b> preset the low point moves from 4.4 in ahead to just behind the ball, the shaft leans about 3° backward, and the 7 iron arrives with about 35° of loft instead of 22°. With the same posture the club reaches the turf almost 6 in early: fat. A scooper who learns to avoid the ground does it by lifting, which saves the contact and keeps the extra loft: high, weak, spinny shots, and thin ones when the lift overshoots.</p>
+    <div class="callout"><b>Try it:</b> press Play on the tour preset, then on Scoop, and watch the wrist-hinge readout in the top-left. In the tour swing about 17° of hinge is left at impact. In the scoop it is gone before the ball and goes negative as the clubhead passes the hands. Then move the release slider 3 in either way from the tour value: one side is fat and the other thin, which is how small the clean window is.</div>
     <p class="hint">Simplified model: one flat plane, a straight lead arm, and a smooth release curve. Real swings add forearm rotation and the trail arm, so treat the numbers as directions and sizes.</p>` },
   { id: 'window', title: 'Launch & spin window', sub: 'Optimizing driver carry for your speed', html: `
     <h1>Launch & spin window</h1>
