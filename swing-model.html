@@ -63,6 +63,23 @@ canvas{display:block;width:100%}
 .tabs button.on{background:var(--panel2);color:var(--text)}
 header{align-items:center}
 .app[hidden],.view .bar label[hidden]{display:none}
+#c3s{height:560px;cursor:grab;touch-action:none}
+#c3s:active{cursor:grabbing}
+.s3time{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.s3time input[type=range]#s3T{flex:1;min-width:200px}
+.s3time button{padding:4px 9px;font-size:12px}
+.s3time b{color:var(--text);min-width:92px}
+.m4s{grid-template-columns:repeat(6,1fr)}
+@media (max-width:1100px){.m4s{grid-template-columns:repeat(3,1fr)}}
+#s3Ctrls{display:flex;flex-direction:column;gap:14px}
+.s3pre{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.s3pre button{padding:5px 6px;font-size:12px}
+.s3pre button.on{background:var(--accent);color:#0b1a12;border-color:var(--accent);font-weight:650}
+.s3pre2{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.s3pre2 button,.s3pre2 select{padding:5px 6px;font-size:12px}
+.s3cmp{margin-top:12px}
+.s3cmp td.big{color:var(--start);font-weight:600}
+.s3cmp .sw{display:inline-block;width:10px;height:10px;border-radius:2px;background:#b48cff;margin-right:6px;vertical-align:-1px}
 .hint{color:var(--muted);font-size:12px;margin:0 0 10px}
 input[type=number]{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 10px;font:inherit}
 input[type=number]::placeholder{color:#56645e}
@@ -124,7 +141,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <body>
 <header>
   <h1>Golf Swing Model</h1>
-  <nav class="tabs"><button data-tab="model" class="on">Swing model</button><button data-tab="diag">Swing diagnosis</button><button data-tab="learn">Learn</button></nav>
+  <nav class="tabs"><button data-tab="model" class="on">Swing model</button><button data-tab="diag">Swing diagnosis</button><button data-tab="learn">Learn</button><button data-tab="s3">3D swing</button></nav>
   <span>Right-handed golfer</span>
 </header>
 
@@ -193,6 +210,36 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
         <div class="bar"><h3>Ball flight</h3></div>
         <canvas id="cFlight"></canvas>
       </div>
+    </div>
+  </main>
+</div>
+
+<div class="app" id="tab3d" hidden>
+  <aside id="s3Ctrls"></aside>
+  <main>
+    <div class="view">
+      <div class="bar">
+        <h3>3D swing · drag to orbit, scroll to zoom</h3>
+        <button data-s3cam="dtl">Down the line</button><button data-s3cam="fo">Face on</button><button data-s3cam="tgt">From target</button><button data-s3cam="top">Overhead</button><button data-s3cam="iso">3/4</button>
+        <label><input type="checkbox" id="s3o_trace"> Clubhead path</label>
+        <label><input type="checkbox" id="s3o_hands"> Hand path</label>
+        <label><input type="checkbox" id="s3o_ghost"> Club at impact</label>
+      </div>
+      <canvas id="c3s"></canvas>
+      <div class="s3time">
+        <button class="primary" id="s3Play">▶ Play</button>
+        <input type="range" id="s3T" min="0" max="2" step="0.001" value="0">
+        <b id="s3TV"></b>
+        <button data-s3t="A">Address</button><button data-s3t="top">Top</button><button data-s3t="imp">Impact</button><button data-s3t="fin">Finish</button>
+        <label>Speed <input type="range" id="s3Rate" min="0.05" max="1" step="0.05" value="0.25" style="width:80px"></label>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sumbar"><h2 style="margin:0">At impact</h2><button class="primary" id="s3Load">Load into model →</button></div>
+      <div class="metrics m4s" id="s3Read"></div>
+      <div class="shape" id="s3Strike"></div>
+      <table class="tgt s3cmp" id="s3CmpTbl" hidden></table>
+      <p class="hint" style="margin:8px 0 0">Kinematic model: the hands travel on a circle around a swing centre in the upper chest, which moves with the pressure shift, tilt, posture and height sliders. Hip and chest turn are drawn for sequencing; the club's path and strike come from those body translations plus the plane, direction, release and face sliders. The default swing is calibrated to a centred, square, tour-like strike.</p>
     </div>
   </main>
 </div>
@@ -1319,9 +1366,12 @@ function showTab(t) {
   document.getElementById('tabModel').hidden = t !== 'model';
   document.getElementById('tabDiag').hidden = t !== 'diag';
   document.getElementById('tabLearn').hidden = t !== 'learn';
+  document.getElementById('tab3d').hidden = t !== 's3';
+  if (t !== 's3' && typeof s3Stop === 'function' && s3Res) s3Stop();
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   if (t === 'model') render();
   else if (t === 'diag') renderDiag();
+  else if (t === 's3') { if (!s3Res) s3Init(); else s3Draw(); }
   else if (!learnStarted) { learnStarted = true; showTopic('aoa'); }
   else learnDraws.forEach(d => d());
 }
@@ -2100,6 +2150,426 @@ function showTopic(id) {
 topicsEl.querySelectorAll('button').forEach(b => b.onclick = () => showTopic(b.dataset.topic));
 window.addEventListener('resize', () => learnDraws.forEach(d => d()));
 let learnStarted = false;
+
+// =====================================================================
+// 3D swing: kinematic golfer (metres, x toward target, y up, z away from the golfer; ball at the origin)
+// The clubhead is driven by a hand circle around a swing centre in the upper chest (which moves with the body's
+// shift, tilt and posture) plus a wrist hinge that releases on a logistic curve. Body rotations are keyframed.
+// =====================================================================
+const S3T = { A: 0.25, top: 1.05, ds: 0.62, end: 2.15 };   // timeline: address hold, top, downswing duration, end (s)
+const S3_CLUBS = { '5i': { lie: 61 }, '7i': { lie: 62.5 }, pw: { lie: 64 } };
+const S3_DEF = { club: '7i', speed: 0, bp: 0, hipTop: 45, chestTop: 90, hipImp: 40, chestImp: 25, shift: 4, tilt: 22, ext: 0, dh: 0,
+  bsLen: 120, hinge: 90, rel: 5.5, plane: 0, dir: 0, face: 0 };
+const S3K = { Rh: 0.56, thH: 64, k: 18, A: -45, g: 1.5, depth: -0.006 };   // g: shaft rotation per degree of wrist hinge (forearm rotation folded in)
+const m3 = {
+  rx: (a, v) => { const c = Math.cos(a), s = Math.sin(a); return V(v.x, v.y * c - v.z * s, v.y * s + v.z * c); },
+  ry: (a, v) => { const c = Math.cos(a), s = Math.sin(a); return V(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); },
+  rz: (a, v) => { const c = Math.cos(a), s = Math.sin(a); return V(v.x * c - v.y * s, v.x * s + v.y * c, v.z); },
+  rot: (v, k, a) => { const c = Math.cos(a), s = Math.sin(a); return add(add(mul(v, c), mul(cross(k, v), s)), mul(k, dot(k, v) * (1 - c))); },
+};
+const ease = u => (1 - Math.cos(Math.PI * clamp(u, 0, 1))) / 2;
+const sm01 = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+// arm angle in the hand plane (deg): 0 at address, negative going back
+// address angle: with the ball forward/back in the stance the arms reach toward it
+const s3Phi0 = P => Math.asin(clamp(P.bp * 0.0254 / (S3K.Rh + 0.9), -0.5, 0.5)) * R2D;
+function s3Phi(t, P) {
+  const fin = 165, p0 = s3Phi0(P);
+  if (t <= S3T.A) return p0;
+  if (t <= S3T.top) return p0 + (-P.bsLen - p0) * ease((t - S3T.A) / (S3T.top - S3T.A));
+  return -P.bsLen + (fin + P.bsLen) * ease((t - S3T.top) / S3T.ds);
+}
+// time the arm passes 0 in the downswing
+const s3tI = P => S3T.top + Math.acos(1 - 2 * P.bsLen / (165 + P.bsLen)) / Math.PI * S3T.ds;
+// keyframed value through address, top, impact, finish (cubic Hermite; moving through impact)
+function s3Key(t, P, v, lead = 0) {
+  const ts = [S3T.A, S3T.top - lead, s3tI(P) - lead * 0.5, S3T.top + S3T.ds];
+  if (t <= ts[0]) return v[0]; if (t >= ts[3]) return v[3];
+  const mI = (v[3] - v[1]) / (ts[3] - ts[1]), m = [0, 0, mI, 0];
+  let i = 0; while (t > ts[i + 1]) i++;
+  const dt = ts[i + 1] - ts[i], u = (t - ts[i]) / dt, u2 = u * u, u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * v[i] + (u3 - 2 * u2 + u) * dt * m[i] + (-2 * u3 + 3 * u2) * v[i + 1] + (u3 - u2) * dt * m[i + 1];
+}
+// body pose at time t (no arms/club)
+function s3Body(t, P) {
+  const IN_ = 0.0254, bp = -P.bp * IN_;
+  const pr = s3Key(t, P, [0, -P.hipTop, P.hipImp, 88], 0.04) * D2R;   // hips lead the downswing slightly
+  const cr = s3Key(t, P, [0, -P.chestTop, P.chestImp, 100]) * D2R;
+  const lam = s3Key(t, P, [6, 2, P.tilt, 16]) * D2R;
+  const bet = s3Key(t, P, [38, 37, 33 - P.ext * 2.5, 10]) * D2R;
+  const px = s3Key(t, P, [0, -0.02, P.shift * IN_, P.shift * IN_ + 0.04], 0.05);
+  const pz = s3Key(t, P, [0, 0, P.ext * IN_, P.ext * IN_]);
+  const py = s3Key(t, P, [0, 0, P.dh * IN_ + 0.015, 0.05]);
+  const heel = s3Key(t, P, [0, 0, 0.03, 0.11]);
+  const Pc = V(-0.01 + bp + px, 0.9 + py, -0.74 + pz);
+  const base = add(Pc, V(0, 0.08, 0));
+  const tilt = v => m3.rx(bet, m3.rz(lam, v)), Rt = v => tilt(m3.ry(cr, v));
+  return {
+    pr, cr, lam, bet, Pc, base, heel, bp,
+    hipL: add(Pc, m3.ry(pr, V(0.1, 0, 0))), hipT: add(Pc, m3.ry(pr, V(-0.1, 0, 0))),
+    hub: add(base, tilt(V(0, 0.4, 0))),
+    shL: add(base, Rt(V(0.18, 0.45, 0))), shT: add(base, Rt(V(-0.18, 0.45, 0))), neck: add(base, tilt(V(0, 0.53, 0.0))),
+    head: add(base, tilt(V(0, 0.66, 0.05))), nose: tilt(m3.ry(cr * 0.25, norm(V(0, -0.55, 0.85)))),
+    ankL: V(0.18 + bp, 0.07, -0.68), ankT: V(-0.2 + bp, 0.07 + heel * 0.5, -0.68),
+  };
+}
+const s3Addr = {};
+function s3Setup(club) {
+  if (s3Addr[club]) return s3Addr[club];
+  const IN_ = 0.0254, lie = S3_CLUBS[club].lie * D2R, Lc = CLUBS[club].len * IN_ - 0.05;
+  const head0 = V(-0.03, 0, 0), s0 = norm(V(-0.08, -Math.sin(lie), Math.cos(lie)));   // grip -> head
+  const H0 = sub(head0, mul(s0, Lc));
+  const th = S3K.thH * D2R, u = V(0, Math.sin(th), -Math.cos(th)), C0 = add(H0, mul(u, S3K.Rh));
+  const xh = V(1, 0, 0), a0 = mul(u, -1);
+  const perp = sub(s0, mul(xh, s0.x)), c0 = norm(perp), psi0 = Math.atan2(s0.x, len(perp)) * R2D;
+  return (s3Addr[club] = { Lc, head0, H0, C0, a0, c0, psi0, xh });
+}
+// clubhead/hands at time t; cal = { dy, dz, roll } calibration offsets
+function s3Club(t, P, cal, body) {
+  const S = s3Setup(P.club), b = body || s3Body(t, P), b0 = s3BodyRef(P.club);
+  const ph = s3Phi(t, P), down = t > S3T.top;
+  const bl = down ? sm01((t - S3T.top) / 0.15) : 0;                      // transition into the downswing plane
+  // downswing plane changes tilt the hand circle about the impact point, so they change path/AoA more than strike
+  const R = v => m3.ry(-(P.dir + cal.dir) * D2R * bl, m3.rx(P.plane * D2R * bl, v));
+  const dHub = add(sub(b.hub, b0.hub), V(0, cal.dy * bl, cal.dz * bl));
+  const C = add(S.C0, dHub), Q = add(S.head0, dHub);
+  const Hraw = add(C, mul(add(mul(S.a0, Math.cos(ph * D2R)), mul(S.xh, Math.sin(ph * D2R))), S3K.Rh));
+  const H = add(Q, R(sub(Hraw, Q)));
+  // wrist hinge
+  let h;
+  if (!down) h = P.hinge * Math.pow(clamp(ph / -P.bsLen, 0, 1), 1.5);
+  else {
+    const pr = Math.asin(clamp(P.rel * 0.0254 / S3K.Rh, -0.95, 0.95)) * R2D, A = S3K.A;
+    const c = pr - S3K.k * Math.log((P.hinge - A) / -A - 1);
+    h = A + (P.hinge - A) / (1 + Math.exp((ph - c) / S3K.k));
+  }
+  const ps = (ph - S3K.g * h + S.psi0) * D2R;
+  const s = norm(R(add(mul(S.c0, Math.cos(ps)), mul(S.xh, Math.sin(ps)))));
+  const ac = norm(R(add(mul(S.c0, -Math.sin(ps)), mul(S.xh, Math.cos(ps)))));
+  const L = (CLUBS[P.club].loft + cal.dL) * D2R;
+  const rollT = (cal.roll + P.face * sm01((ph + 60) / 60) * (down ? 1 : 0)) * D2R;
+  // the face follows the arc, except a swing-direction change doesn't turn it (face aim is its own slider)
+  const n = m3.ry((P.dir) * D2R * bl, norm(m3.rot(sub(mul(ac, Math.cos(L)), mul(s, Math.sin(L))), s, rollT)));
+  const head = add(H, mul(s, S.Lc));
+  return { ph, h, H, s, n, head, C };
+}
+// sample the downswing finely and measure impact
+function s3Measure(P, cal) {
+  const dt = 1 / 3000, tI0 = s3tI(P), pts = [];
+  for (let t = S3T.top; t <= S3T.top + S3T.ds; t += dt) pts.push([t, s3Club(t, P, cal).head]);
+  let iMinX = 0; for (let i = 0; i < pts.length / 2; i++) if (pts[i][1].x < pts[iMinX][1].x) iMinX = i;
+  let i = iMinX; while (i < pts.length - 1 && pts[i][1].x < -0.021) i++;
+  let iLow = iMinX; for (let j = iMinX; j < pts.length * 0.8; j++) if (pts[j][1].y < pts[iLow][1].y) iLow = j;
+  const tImp = pts[i][0], a = pts[i - 1][1], b = pts[i][1], v = sub(b, a);
+  const ci = s3Club(tImp, P, cal);
+  const hz = Math.hypot(v.x, v.z), path = Math.atan2(v.z, v.x) * R2D, aoa = Math.atan2(v.y, hz) * R2D;
+  const n = ci.n, face = Math.atan2(n.z, n.x) * R2D, dl = Math.atan2(n.y, Math.hypot(n.x, n.z)) * R2D;
+  const sh = ci.s, lean = Math.atan2(-sh.x, -sh.y) * R2D;          // grip ahead of head = +
+  let early = 0; for (let j = iMinX; j < i; j++) if (pts[j][1].y < 0) { early = -0.021 - pts[j][1].x; break; }
+  const lpP = pts[iLow][1];
+  return { tImp, tI0, head: ci.head, path, aoa, face, dl, lean, early, sole: ci.head.y, toe: ci.head.z, lp: lpP.x, bottom: lpP.y, speedMS: len(v) / dt, ci, pts };
+}
+// reference body (default swing, ball centred) the hand circle is measured from
+const s3Ref = {};
+const s3BodyRef = club => s3Ref[club] || (s3Ref[club] = s3Body(0, { ...S3_DEF, club }));
+// per-club calibration so the default swing bottoms at S3K.depth, strikes the centre, has a square face and zero path,
+// and delivers dynamic loft = static loft − shaft lean
+const s3Cal = {};
+function s3Calib(club) {
+  if (s3Cal[club]) return s3Cal[club];
+  const P = { ...S3_DEF, club }, cal = { dy: 0, dz: 0, roll: 0, dir: 0, dL: 0, v: 1 };
+  for (let k = 0; k < 8; k++) {
+    const m = s3Measure(P, cal);
+    cal.dy -= m.bottom - S3K.depth; cal.dz -= m.head.z; cal.roll -= m.face; cal.dir -= m.path; cal.dL -= m.dl - (CLUBS[club].loft - m.lean);
+    cal.v = m.speedMS;
+  }
+  return (s3Cal[club] = cal);
+}
+
+// ---- 3D swing tab: controls, state, rendering ----
+const S3_GROUPS = [
+  ['Setup', [
+    { key: 'club', label: 'Club', options: { '5i': '5 iron', '7i': '7 iron', pw: 'PW' } },
+    { key: 'speed', label: 'Club speed (default swing)', min: 60, max: 110, step: 1, unit: ' mph', dec: 0 },
+    { key: 'bp', label: 'Ball position', min: -3, max: 3, step: 0.25, unit: ' in', signed: true, dec: 2, hint: '+ forward in the stance' },
+  ]],
+  ['Backswing', [
+    { key: 'hipTop', label: 'Hip turn at the top', min: 20, max: 70, step: 1, unit: '°', dec: 0 },
+    { key: 'chestTop', label: 'Chest turn at the top', min: 60, max: 120, step: 1, unit: '°', dec: 0 },
+    { key: 'bsLen', label: 'Backswing length (lead arm)', min: 80, max: 140, step: 1, unit: '°', dec: 0, hint: 'arm angle from address; 90° = lead arm parallel' },
+    { key: 'hinge', label: 'Wrist hinge at the top', min: 50, max: 110, step: 1, unit: '°', dec: 0 },
+  ]],
+  ['Downswing body', [
+    { key: 'shift', label: 'Pressure shift toward target', min: 0, max: 8, step: 0.25, unit: ' in', dec: 2, hint: 'pelvis movement toward the target by impact' },
+    { key: 'hipImp', label: 'Hips open at impact', min: 0, max: 60, step: 1, unit: '°', dec: 0 },
+    { key: 'chestImp', label: 'Chest open at impact', min: -10, max: 50, step: 1, unit: '°', dec: 0 },
+    { key: 'tilt', label: 'Side tilt at impact', min: 8, max: 35, step: 0.5, unit: '°', dec: 1, hint: 'spine tilted away from the target' },
+    { key: 'ext', label: 'Early extension', min: 0, max: 4, step: 0.1, unit: ' in', dec: 1, hint: 'hips move toward the ball and the spine stands up' },
+    { key: 'dh', label: 'Height change through impact', min: -2, max: 2, step: 0.05, unit: ' in', signed: true, dec: 2, hint: '+ stands up, − dips' },
+  ]],
+  ['Arms & club', [
+    { key: 'rel', label: 'Release point', min: -6, max: 14, step: 0.25, unit: ' in', signed: true, dec: 2, hint: 'hands vs chest centre when arm and shaft line up; lower = earlier release (cast)' },
+    { key: 'plane', label: 'Downswing plane change', min: -8, max: 8, step: 0.25, unit: '°', signed: true, dec: 2, hint: '+ steeper than the backswing, − shallower' },
+    { key: 'dir', label: 'Swing direction change', min: -8, max: 8, step: 0.25, unit: '°', signed: true, dec: 2, hint: '+ more in-to-out, − more out-to-in' },
+    { key: 'face', label: 'Face rotation at impact', min: -8, max: 8, step: 0.25, unit: '°', signed: true, dec: 2, hint: '+ open (less forearm rotation), − closed' },
+  ]],
+];
+const s3Defaults = club => ({ ...S3_DEF, club, speed: PROFILES.tour.clubs[club].speed });
+let s3P = s3Defaults('7i');
+const s3Cam = { yaw: 200 * D2R, pitch: 12 * D2R, dist: 4.8, target: V(-0.05, 0.95, -0.45) };
+const S3_CAMS = { dtl: [180, 6, 4.8], fo: [90, 6, 4.8], top: [180, 86, 5.2], tgt: [0, 6, 4.8], iso: [200, 12, 4.8] };
+const s3Anim = { t: 0, playing: false, last: 0, rate: 0.25 };
+const s3Opt = { trace: true, hands: false, ghost: true, cmpMode: 'overlay' };
+let s3Res = null, s3CmpRes = null, s3CmpSel = 'none', s3Snap = null, s3Raf = 0;
+// common faults, each a set of slider changes from the default (tour) swing
+const S3_PRESETS = {
+  tour: { name: 'Tour swing', p: {}, desc: 'Calibrated reference: shift onto the lead side, tilt away, hold the hinge. Square, centred, ball-first strike with forward shaft lean.' },
+  ott: { name: 'Over the top', p: { dir: -5, plane: 4, chestImp: 40, face: -1 }, desc: 'Steeper, out-to-in downswing with the chest open early. The face is open to the path: slice or pull-slice.' },
+  cast: { name: 'Early release', p: { rel: -1.5, hinge: 80 }, desc: 'Wrist hinge thrown from the top (casting/scooping). Low point moves back, shaft lean disappears, loft goes up: fat and weak.' },
+  hang: { name: 'Hanging back', p: { shift: 0.5, tilt: 30, hipImp: 25 }, desc: 'Little pressure shift and too much tilt away. The arc bottoms behind the ball: fat, with the club hitting up.' },
+  ee: { name: 'Early extension', p: { ext: 1.5, dh: 0.15, hipImp: 30 }, desc: 'Hips thrust toward the ball and the spine stands up. The hands get pushed out and up: thin, toward the heel.' },
+  stuck: { name: 'Stuck / in-to-out', p: { dir: 5, plane: -4, chestImp: 5 }, desc: 'Too shallow and too far from the inside with the chest closed. Path well right of the face: push-hook.' },
+  sway: { name: 'Lateral slide', p: { shift: 6, hipImp: 15, tilt: 16 }, desc: 'Hips slide toward the target without turning. Low point jumps forward, attack angle gets very steep: thin, low.' },
+  over: { name: 'Overswing', p: { bsLen: 138, hinge: 105, chestTop: 112, hipTop: 62, rel: 3 }, desc: 'Longer backswing that is hard to hold: more speed, but the release comes early and the arc bottoms behind the ball.' },
+};
+const s3Params = key => ({ ...s3Defaults(s3P.club), ...(key === 'snap' ? { ...s3Snap, club: s3P.club, speed: s3P.speed } : S3_PRESETS[key].p) });
+const s3fmt = (c, v) => (c.signed ? fmtSigned(v, c.dec ?? 1) : (+v).toFixed(c.dec ?? 1)) + (c.unit || '');
+function s3Build() {
+  const el = document.getElementById('s3Ctrls');
+  const presets = `<div class="card"><h2>Presets</h2><div class="s3pre">${Object.entries(S3_PRESETS).map(([k, p]) => `<button data-pre="${k}">${p.name}</button>`).join('')}</div>
+    <p class="hint" id="s3PreDesc" style="margin:8px 0 10px"></p>
+    <div class="ctrl"><div class="row"><span>Compare with</span></div><select id="s3Cmp"><option value="none">Nothing</option>${Object.entries(S3_PRESETS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('')}<option value="snap" disabled>Snapshot</option></select></div>
+    <div class="s3pre2"><button id="s3SnapBtn">Snapshot current swing</button><select id="s3CmpMode"><option value="overlay">Overlay</option><option value="side">Side by side</option></select></div></div>`;
+  el.innerHTML = presets + S3_GROUPS.map(([g, cs], gi) => `<div class="card"><h2>${g}</h2>${cs.map(c => c.options
+    ? `<div class="ctrl"><div class="row"><span>${c.label}</span></div><select data-k="${c.key}">${Object.entries(c.options).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>`
+    : `<div class="ctrl"><div class="row"><span>${c.label}</span><b data-v="${c.key}"></b></div><input type="range" data-k="${c.key}" min="${c.min}" max="${c.max}" step="${c.step}">${c.hint ? `<small>${c.hint}</small>` : ''}</div>`).join('')}
+    ${gi === 0 ? '<button id="s3Reset" style="width:100%">Reset to tour swing</button>' : ''}</div>`).join('');
+  el.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('input', () => {
+    const k = inp.dataset.k;
+    if (k === 'club') s3P = { ...s3P, club: inp.value, speed: PROFILES.tour.clubs[inp.value].speed };
+    else s3P[k] = +inp.value;
+    s3Sync(); s3Update();
+  }));
+  const applyPre = k => { s3P = { ...s3Defaults(s3P.club), ...S3_PRESETS[k].p }; s3Sync(); s3Update(); };
+  el.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => {
+    const k = b.dataset.pre; applyPre(k);
+    // a fault preset compares against the tour swing by default
+    if (k !== 'tour' && s3CmpSel === 'none') { s3CmpSel = 'tour'; document.getElementById('s3Cmp').value = 'tour'; s3Update(); }
+  });
+  document.getElementById('s3Reset').onclick = () => applyPre('tour');
+  document.getElementById('s3Cmp').onchange = e => { s3CmpSel = e.target.value; s3Update(); };
+  document.getElementById('s3CmpMode').onchange = e => { s3Opt.cmpMode = e.target.value; s3Frame(); s3Draw(); };
+  document.getElementById('s3SnapBtn').onclick = () => {
+    s3Snap = { ...s3P }; const sel = document.getElementById('s3Cmp'), o = sel.querySelector('[value="snap"]');
+    o.disabled = false; o.textContent = `Snapshot (${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`;
+    sel.value = s3CmpSel = 'snap'; s3Update();
+  };
+}
+function s3Sync() {
+  for (const c of S3_GROUPS.flatMap(g => g[1])) {
+    const inp = document.querySelector(`#s3Ctrls [data-k="${c.key}"]`); if (inp) inp.value = s3P[c.key];
+    const b = document.querySelector(`#s3Ctrls [data-v="${c.key}"]`); if (b) b.textContent = s3fmt(c, s3P[c.key]);
+  }
+  // highlight the preset that matches the sliders exactly
+  let on = null;
+  for (const [k, p] of Object.entries(S3_PRESETS)) { const q = { ...s3Defaults(s3P.club), ...p.p }; if (Object.keys(S3_DEF).every(x => x === 'club' || x === 'speed' || q[x] === s3P[x])) on = k; }
+  document.querySelectorAll('#s3Ctrls [data-pre]').forEach(b => b.classList.toggle('on', b.dataset.pre === on));
+  document.getElementById('s3PreDesc').textContent = on ? S3_PRESETS[on].desc : 'Custom swing. Pick a preset, or compare against one below.';
+}
+// impact numbers, ball flight and traces for one set of parameters
+function s3Solve(P) {
+  const cal = s3Calib(P.club), m = s3Measure(P, cal), speed = P.speed * m.speedMS / cal.v;
+  const fl = learnModel(P.club, { speed, aoa: m.aoa, path: m.path, face: m.face, dl: clamp(m.dl, 4, 65) });
+  const trace = [];
+  for (let t = 0; t <= S3T.end + 1e-9; t += 1 / 400) { const c = s3Club(Math.min(t, S3T.end), P, cal); trace.push({ t, head: c.head, H: c.H }); }
+  const tops = s3Body(S3T.top, P);
+  return { P, cal, m, speed, fl, trace, xTop: (tops.pr - tops.cr) * R2D };
+}
+function s3Update() {
+  s3Res = s3Solve(s3P);
+  s3CmpRes = s3CmpSel === 'none' ? null : s3Solve(s3Params(s3CmpSel));
+  s3Frame(); s3Readout(); s3Draw();
+}
+// camera target: centred on one golfer, or between two side by side
+const s3Side = () => s3CmpRes && s3Opt.cmpMode === 'side';
+const S3_SIDE = 1.25;
+function s3Frame() { s3Cam.target = s3Side() ? V(0, 0.95, -0.45) : V(-0.05, 0.95, -0.45); if (s3Side()) s3Cam.dist = Math.max(s3Cam.dist, 6.2); }
+function s3Strike(m) {
+  const IN_ = 0.0254, sole = m.sole / IN_, early = m.early / IN_, toe = m.toe / IN_;
+  const kind = sole > BALL_IN - 0.12 ? 'Topped' : early > 0.2 ? `Fat (${early.toFixed(1)} in early)` : BALL_IN - (sole + 0.79) < -0.25 ? 'Thin' : 'Clean';
+  const side = toe > 1.2 ? 'shank risk' : toe > 0.4 ? `${toe.toFixed(1)} in toward heel` : toe < -0.4 ? `${(-toe).toFixed(1)} in toward toe` : 'centre';
+  return { kind, side, good: kind === 'Clean' && Math.abs(toe) <= 0.4 };
+}
+// [label, value, unit, decimals, signed]
+function s3Metrics(r) {
+  const { m, speed, fl, xTop, P } = r, b = s3Body(m.tImp, P);
+  return [['Club speed', speed, 'mph', 0], ['Attack angle', m.aoa, '°', 1, 1], ['Club path', m.path, '°', 1, 1], ['Face', m.face, '°', 1, 1],
+    ['Face to path', m.face - m.path, '°', 1, 1], ['Dynamic loft', m.dl, '°', 1], ['Shaft lean', m.lean, '°', 1, 1], ['Low point', m.lp / 0.0254, 'in', 1, 1],
+    ['Hips open (impact)', b.pr * R2D, '°', 0, 1], ['Chest open (impact)', b.cr * R2D, '°', 0, 1], ['X-factor (top)', Math.abs(xTop), '°', 0], ['Carry', fl.flight.carry / YD, 'yd', 0]];
+}
+const s3v = (x, d, sg) => sg ? fmtSigned(x, d) : x.toFixed(d);
+function s3Readout() {
+  const st = s3Strike(s3Res.m), mt = s3Metrics(s3Res);
+  document.getElementById('s3Read').innerHTML = mt.map(([k, v, u, d, sg]) => `<div class="m"><div class="k">${k}</div><div class="v">${s3v(v, d, sg)}<i>${u}</i></div></div>`).join('');
+  document.getElementById('s3Strike').innerHTML = `<b style="color:${st.good ? 'var(--accent)' : 'var(--low)'}">${st.kind}</b> · ${st.side} · ${shotShape(s3Res.fl)}`;
+  const tb = document.getElementById('s3CmpTbl');
+  if (!s3CmpRes) { tb.hidden = true; return; }
+  const ct = s3Metrics(s3CmpRes), cs = s3Strike(s3CmpRes.m), name = s3CmpSel === 'snap' ? 'Snapshot' : S3_PRESETS[s3CmpSel].name;
+  tb.hidden = false;
+  tb.innerHTML = `<thead><tr><th></th><th>This swing</th><th><span class="sw"></span>${name}</th><th>Difference</th></tr></thead><tbody>${mt.map(([k, v, u, d, sg], i) => {
+    const c = ct[i][1], dv = v - c, big = Math.abs(dv) >= (u === 'yd' ? 5 : u === 'mph' ? 2 : 1);
+    return `<tr><td>${k}</td><td>${s3v(v, d, sg)}${u === '°' ? '°' : ' ' + u}</td><td>${s3v(c, d, sg)}${u === '°' ? '°' : ' ' + u}</td><td class="${big ? 'big' : ''}">${fmtSigned(dv, d)}${u === '°' ? '°' : ' ' + u}</td></tr>`; }).join('')}
+    <tr><td>Strike</td><td>${st.kind}, ${st.side}</td><td>${cs.kind}, ${cs.side}</td><td></td></tr>
+    <tr><td>Shape</td><td>${shotShape(s3Res.fl)}</td><td>${shotShape(s3CmpRes.fl)}</td><td></td></tr></tbody>`;
+}
+
+// ---- rendering ----
+const S3COL = { shirt: '#4c78a8', pants: '#2d3842', skin: '#c99f7c', shoe: '#d8dcda', glove: '#eef1ef', shaft: '#c9d1cd', grip: '#1d2321', head: '#aab4af' };
+const S3CMP = '#b48cff';
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(clamp(x * k, 0, 255))); return `rgb(${c})`; }
+function ik2(a, c, l1, l2, pole) {
+  const ac = sub(c, a), d = len(ac), u = mul(ac, 1 / (d || 1));
+  if (d >= l1 + l2 - 1e-4) return add(a, mul(u, l1 * d / (l1 + l2)));
+  const x = (l1 * l1 + d * d - l2 * l2) / (2 * d), hgt = Math.sqrt(Math.max(0, l1 * l1 - x * x));
+  const pv = norm(sub(pole, mul(u, dot(pole, u))));
+  return add(add(a, mul(u, x)), mul(pv, hgt));
+}
+// mannequin + club as a list of primitives at time t. o: { alpha, off (render offset), tint (shirt colour), only (filter) }
+function s3Prims(t, P, cal, o = {}) {
+  const b = s3Body(t, P), c = s3Club(t, P, cal, b), out = [], off = o.off || V(0, 0, 0), alpha = o.alpha ?? 1, shirt = o.tint || S3COL.shirt;
+  const cap = (a, e, r, col, part) => out.push({ k: 'c', a: add(a, off), b: add(e, off), r, col, part, alpha });
+  const sph = (p, r, col) => out.push({ k: 's', a: add(p, off), r, col, alpha });
+  // legs
+  const dirL = V(Math.sin(25 * D2R), 0, Math.cos(25 * D2R)), dirT = V(-Math.sin(10 * D2R), 0, Math.cos(10 * D2R));
+  const kL = ik2(b.hipL, b.ankL, 0.45, 0.45, m3.ry(b.pr * 0.6, V(0.35, 0, 1))), kT = ik2(b.hipT, b.ankT, 0.45, 0.45, m3.ry(b.pr * 0.6, V(-0.25, 0, 1)));
+  cap(b.hipL, kL, 0.075, S3COL.pants); cap(kL, b.ankL, 0.055, S3COL.pants);
+  cap(b.hipT, kT, 0.075, S3COL.pants); cap(kT, b.ankT, 0.055, S3COL.pants);
+  cap(add(b.ankL, V(-dirL.x * 0.06, -0.04, -dirL.z * 0.06)), add(b.ankL, V(dirL.x * 0.17, -0.04, dirL.z * 0.17)), 0.045, S3COL.shoe);
+  const toeT = add(V(b.ankT.x, 0.03, b.ankT.z), mul(dirT, 0.17));
+  cap(add(b.ankT, V(-dirT.x * 0.06, -0.04 + b.heel * 0.5, -dirT.z * 0.06)), toeT, 0.045, S3COL.shoe);
+  // torso
+  cap(b.hipL, b.hipT, 0.11, S3COL.pants);
+  const midSh = mul(add(b.shL, b.shT), 0.5);
+  cap(b.base, mul(add(midSh, b.base), 0.5), 0.13, shirt); cap(mul(add(midSh, b.base), 0.5), midSh, 0.13, shirt);
+  cap(b.shL, b.shT, 0.07, shirt);
+  cap(b.neck, b.head, 0.05, S3COL.skin);
+  sph(b.head, 0.105, S3COL.skin); sph(add(b.head, mul(b.nose, 0.1)), 0.022, S3COL.skin);
+  // arms to the grip (lead hand on top, trail hand below it)
+  const TH = add(c.H, mul(c.s, 0.085));
+  const eL = ik2(b.shL, c.H, 0.3, 0.29, V(0.2, -1, -0.5)), eT = ik2(b.shT, TH, 0.3, 0.29, V(-0.3, -1, -0.5));
+  cap(b.shL, eL, 0.045, shirt); cap(eL, c.H, 0.037, S3COL.skin);
+  cap(b.shT, eT, 0.045, shirt); cap(eT, TH, 0.037, S3COL.skin);
+  sph(c.H, 0.04, S3COL.glove); sph(TH, 0.038, S3COL.skin);
+  // club
+  const butt = sub(c.H, mul(c.s, 0.06));
+  cap(butt, add(butt, mul(c.s, 0.26)), 0.012, S3COL.grip, 'club');
+  cap(add(butt, mul(c.s, 0.26)), c.head, 0.005, S3COL.shaft, 'club');
+  const toeDir = norm(cross(c.s, c.n)), hc = add(c.head, V(0, 0.018, 0));
+  cap(sub(hc, mul(toeDir, 0.02)), add(hc, mul(toeDir, 0.055)), 0.02, S3COL.head, 'club');
+  out.push({ k: 'face', part: 'club', a: add(add(sub(hc, mul(toeDir, 0.015)), mul(c.n, 0.021)), off), b: add(add(add(hc, mul(toeDir, 0.05)), mul(c.n, 0.021)), off), r: 0.006, alpha });
+  return o.only ? out.filter(q => q.part === o.only) : out;
+}
+function s3Phase(t, m) {
+  return t < S3T.A ? 'Address' : t < S3T.top - 0.004 ? 'Backswing' : t <= S3T.top + 0.004 ? 'Top' : t < m.tImp - 0.004 ? 'Downswing' : t < m.tImp + 0.004 ? 'Impact' : t < S3T.top + S3T.ds ? 'Follow-through' : 'Finish';
+}
+function s3Draw() {
+  const cv = document.getElementById('c3s'); if (!s3Res || cv.offsetParent === null) return;
+  const { ctx, w, h } = prep(cv), P3 = makeProj(w, h, s3Cam), t = s3Anim.t, side = s3Side();
+  const figs = [{ r: s3Res, off: V(side ? -S3_SIDE : 0, 0, 0), tint: null, alpha: 1, trace: COL.accent, name: 'This swing' }];
+  if (s3CmpRes) figs.push({ r: s3CmpRes, off: V(side ? S3_SIDE : 0, 0, 0), tint: S3CMP, alpha: side ? 1 : 0.3, trace: S3CMP,
+    name: s3CmpSel === 'snap' ? 'Snapshot' : S3_PRESETS[s3CmpSel].name });
+  // ground
+  ctx.fillStyle = '#0f1a14'; ctx.fillRect(0, 0, w, h);
+  const gx = side ? 4.5 : 3;
+  for (let i = -gx; i <= gx; i += 0.5) line(ctx, [P3(V(i, 0, -2.5)), P3(V(i, 0, 2))], 'rgba(255,255,255,0.05)', 1);
+  for (let j = -2.5; j <= 2; j += 0.5) line(ctx, [P3(V(-gx, 0, j)), P3(V(gx, 0, j))], 'rgba(255,255,255,0.05)', 1);
+  line(ctx, [P3(V(-gx, 0, 0)), P3(V(gx, 0, 0))], 'rgba(228,235,231,0.45)', 1.5);
+  const tl = P3(V(gx - 0.3, 0, 0)); if (tl) label(ctx, 'Target →', tl[0], tl[1] - 12, COL.muted, 'center', false);
+  const items = [];
+  for (const [fi, f] of figs.entries()) {
+    const { m, trace, fl, P, cal } = f.r, o = f.off, IN_ = 0.0254;
+    line(ctx, [P3(add(V(-1.2, 0, -0.62), o)), P3(add(V(1.2, 0, -0.62), o))], 'rgba(228,235,231,0.12)', 1, [4, 4]);
+    const lpG = P3(add(V(m.lp, 0, 0), o));
+    if (lpG) { dot2(ctx, lpG, 4, fi ? S3CMP : COL.low); if (fi === 0 || side) label(ctx, `low point ${fmtSigned(m.lp / IN_)} in`, lpG[0] + 8, lpG[1] + 14 + (fi && !side ? 18 : 0), fi ? S3CMP : COL.low); }
+    if (s3Opt.hands) line(ctx, trace.map(q => P3(add(q.H, o))), fi ? 'rgba(180,140,255,0.4)' : 'rgba(228,235,231,0.35)', 1.2, [4, 4]);
+    if (s3Opt.trace) {
+      line(ctx, trace.map(q => P3(add(q.head, o))), fi ? 'rgba(180,140,255,0.22)' : 'rgba(95,211,154,0.22)', 1.5);
+      line(ctx, trace.filter(q => q.t <= t).map(q => P3(add(q.head, o))), f.trace, 2.2);
+    }
+    // ball: on the ground until impact, then launched along the measured start direction
+    let bp = V(0, BALL_R, 0);
+    if (t > m.tImp) { const dt = t - m.tImp, la = fl.vla * D2R, ha = fl.hla * D2R, d = fl.ballMph * 0.447 * dt; bp = V(d * Math.cos(la) * Math.cos(ha), BALL_R + d * Math.sin(la), d * Math.cos(la) * Math.sin(ha)); }
+    if (fi === 0 || side) { const q = P3(add(bp, o)); if (q) items.push({ ball: true, a: q, z: q[2] }); }
+    const prims = s3Prims(t, P, cal, { off: o, tint: f.tint, alpha: f.alpha });
+    // shadows
+    ctx.save(); ctx.globalAlpha = 0.18 * f.alpha; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
+    for (const q of prims) if (q.k === 'c') { const a = P3(V(q.a.x, 0, q.a.z)), e = P3(V(q.b.x, 0, q.b.z)); if (a && e) { ctx.lineWidth = Math.max(1, 2 * q.r * P3.f / a[2]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); } }
+    ctx.restore();
+    if (s3Opt.ghost && fi === 0 && Math.abs(t - m.tImp) > 0.01) prims.push(...s3Prims(m.tImp, P, cal, { off: o, alpha: 0.22, only: 'club' }));
+    // overlay: the ghost is drawn as its own pass on top, so both figures stay readable
+    for (const q of prims) { const a = P3(q.a), e = q.b ? P3(q.b) : a; if (a && e) items.push({ q, a, e, z: (a[2] + e[2]) / 2, pass: side ? 0 : fi }); }
+    if (side) { const hp = P3(add(V(-0.1, 2.15, -0.6), o)); if (hp) label(ctx, f.name, hp[0], hp[1], fi ? S3CMP : COL.text, 'center'); }
+  }
+  // depth-sorted figures
+  let zMin = 1e9, zMax = -1e9; for (const it of items) { zMin = Math.min(zMin, it.z); zMax = Math.max(zMax, it.z); }
+  items.sort((x, y) => (x.pass || 0) - (y.pass || 0) || y.z - x.z);
+  ctx.save(); ctx.lineCap = 'round';
+  for (const it of items) {
+    if (it.ball) { ctx.globalAlpha = 1; ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.arc(it.a[0], it.a[1], Math.max(2.5, BALL_R * P3.f / it.a[2]), 0, 7); ctx.fill(); continue; }
+    const { q, a, e, z } = it, k = 1.08 - 0.3 * (z - zMin) / Math.max(0.01, zMax - zMin);
+    ctx.globalAlpha = q.alpha;
+    if (q.k === 'face') { ctx.strokeStyle = COL.face; ctx.lineWidth = Math.max(2, 2 * q.r * P3.f / z); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); continue; }
+    const px = Math.max(q.k === 's' ? 2 : 1.2, (q.k === 's' ? 1 : 2) * q.r * P3.f / z);
+    ctx.strokeStyle = ctx.fillStyle = shade(q.col, k);
+    if (q.k === 's') { ctx.beginPath(); ctx.arc(a[0], a[1], px, 0, 7); ctx.fill(); }
+    else { ctx.lineWidth = px; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); }
+  }
+  ctx.restore();
+  // labels
+  const ph = s3Phase(t, s3Res.m), b = s3Body(t, s3Res.P);
+  label(ctx, `${ph} · ${(t * 1000).toFixed(0)} ms`, 12, 16, COL.text);
+  label(ctx, `hips ${fmtSigned(b.pr * R2D, 0)}° · chest ${fmtSigned(b.cr * R2D, 0)}° (+ open)`, 12, 38, COL.muted);
+  if (s3CmpRes && !side) { label(ctx, 'This swing', 12, 60, COL.text); label(ctx, `${figs[1].name} (ghost)`, 100, 60, S3CMP); }
+  document.getElementById('s3T').value = t; document.getElementById('s3TV').textContent = ph;
+}
+function s3Tick(now) {
+  s3Raf = 0;
+  if (!s3Anim.playing) return;
+  s3Anim.t = Math.min(S3T.end, s3Anim.t + Math.max(0, now - s3Anim.last) / 1000 * s3Anim.rate); s3Anim.last = now;
+  if (s3Anim.t >= S3T.end) s3Stop();
+  s3Draw(); if (s3Anim.playing) s3Raf = requestAnimationFrame(s3Tick);
+}
+function s3Stop() { s3Anim.playing = false; if (s3Raf) cancelAnimationFrame(s3Raf); s3Raf = 0; document.getElementById('s3Play').textContent = '▶ Play'; }
+function s3Init() {
+  s3Build(); s3Sync();
+  const cv = document.getElementById('c3s');
+  let dr = null;
+  cv.addEventListener('pointerdown', e => { dr = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => { if (!dr) return; s3Cam.yaw += (e.clientX - dr[0]) * 0.008; s3Cam.pitch = clamp(s3Cam.pitch + (e.clientY - dr[1]) * 0.006, -0.05, 1.55); dr = [e.clientX, e.clientY]; s3Draw(); });
+  cv.addEventListener('pointerup', () => dr = null);
+  cv.addEventListener('wheel', e => { e.preventDefault(); s3Cam.dist = clamp(s3Cam.dist * Math.exp(e.deltaY * 0.001), 1.2, 12); s3Draw(); }, { passive: false });
+  document.querySelectorAll('[data-s3cam]').forEach(btn => btn.onclick = () => { const [y, p, d] = S3_CAMS[btn.dataset.s3cam]; s3Cam.yaw = y * D2R; s3Cam.pitch = p * D2R; s3Cam.dist = d; s3Draw(); });
+  const tEl = document.getElementById('s3T'); tEl.max = S3T.end;
+  tEl.addEventListener('input', () => { s3Stop(); s3Anim.t = +tEl.value; s3Draw(); });
+  document.getElementById('s3Play').onclick = () => {
+    if (s3Anim.playing) return s3Stop();
+    if (s3Anim.t >= S3T.end - 1e-3) s3Anim.t = 0;
+    s3Anim.playing = true; s3Anim.last = performance.now(); document.getElementById('s3Play').textContent = '❚❚ Pause';
+    if (!s3Raf) s3Raf = requestAnimationFrame(s3Tick);
+  };
+  document.querySelectorAll('[data-s3t]').forEach(btn => btn.onclick = () => {
+    s3Stop(); const k = btn.dataset.s3t;
+    s3Anim.t = k === 'A' ? 0 : k === 'top' ? S3T.top : k === 'imp' ? s3Res.m.tImp : S3T.end; s3Draw();
+  });
+  const rate = document.getElementById('s3Rate'); rate.addEventListener('input', () => s3Anim.rate = +rate.value);
+  for (const k of ['trace', 'hands', 'ghost']) { const cb = document.getElementById('s3o_' + k); cb.checked = s3Opt[k]; cb.onchange = () => { s3Opt[k] = cb.checked; s3Draw(); }; }
+  document.getElementById('s3Load').onclick = () => {
+    const { m, speed, P } = s3Res, base = PROFILES.tour.clubs[P.club];
+    Object.assign(state, deliveryState(P.club, { speed: Math.round(speed), vsp: base.vsp, aoa: +m.aoa.toFixed(1), path: +m.path.toFixed(1), face: +m.face.toFixed(1), dl: +clamp(m.dl, 4, 65).toFixed(1) }), { profile: null, depthAuto: true });
+    showTab('model'); syncControls(); render();
+  };
+  s3Anim.t = 0; s3Update();
+  window.addEventListener('resize', s3Draw);
+}
 </script>
 </body>
 </html>
