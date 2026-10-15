@@ -113,6 +113,9 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 .wctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 18px;padding:10px 12px}
 .wctl label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
 .wctl label b{color:var(--text);font-variant-numeric:tabular-nums}
+.wbtns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px 0;font-size:12px;color:var(--muted)}
+.wbtns button{padding:4px 9px;font-size:12px}
+.wbtns .sep{flex:1}
 .widget .cap{font-size:12px !important;color:var(--muted) !important;margin:0;padding:0 12px 10px}
 .nextt{margin-top:18px}
 @media (max-width:860px){.app.learn{grid-template-columns:1fr}.article{padding:16px}}
@@ -162,7 +165,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
         <button data-cam="top">Overhead</button>
         <label><input type="checkbox" id="showVec" checked> Impact vectors</label>
         <label><input type="checkbox" id="followFlight" checked> Ball flight on play</label>
-        <label title="Playback speed for the swing and ball flight">Speed <input type="range" id="playSpeed" min="0.1" max="2" step="0.05" value="1"> <b id="playSpeedV">1.00×</b></label>
+        <label title="Playback speed for the swing; the ball flight always plays at normal speed">Speed <input type="range" id="playSpeed" min="0.1" max="2" step="0.05" value="1"> <b id="playSpeedV">1.00×</b></label>
         <button class="primary" id="play">▶ Play swing</button>
       </div>
       <canvas id="c3d"></canvas>
@@ -921,8 +924,9 @@ function frame(now) {
   const m = model;
   let phi = m.phiB, frac = 1, k = 0, frac3d = 0;
   if (anim) {
-    // accumulate scaled time so the speed slider can change mid-play without jumping
-    anim.t += Math.max(0, now - anim.last) / 1000 * playSpeed; anim.last = now;
+    // the speed slider scales the swing clock only; the ball flight (and camera) run on real time from impact
+    const dt = Math.max(0, now - anim.last) / 1000; anim.last = now;
+    anim.t += dt * playSpeed;
     const t = anim.t;
     const u = Math.min(1, t / SWING_T);
     const ease = (1 - Math.cos(Math.PI * u)) / 2;     // fastest at the bottom of the arc
@@ -930,14 +934,16 @@ function frame(now) {
     // time at which the arc passes the ball
     const eImp = (m.phiB - PHI0) / (PHI1 - PHI0);
     const tImp = Math.acos(1 - 2 * eImp) / Math.PI * SWING_T;
+    if (anim.tf === null) { if (t >= tImp) anim.tf = 0; } else anim.tf += dt;
+    const tf = anim.tf ?? -1;
     const flightDur = m.flight.time / 2;               // 2× speed
-    frac = frac3d = t < tImp ? 0 : Math.min(1, (t - tImp) / flightDur);
+    frac = frac3d = tf < 0 ? 0 : Math.min(1, tf / flightDur);
     // camera: pull back to follow the flight, hold on the landing, then return
     const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
-    const tLand = tImp + flightDur, HOLD = 1.5, BACK = 1.0;
-    k = t < tLand + HOLD ? smooth((t - tImp - 0.15) / 0.9) : 1 - smooth((t - tLand - HOLD) / BACK);
+    const HOLD = 1.5, BACK = 1.0;
+    k = tf < flightDur + HOLD ? smooth((tf - 0.15) / 0.9) : 1 - smooth((tf - flightDur - HOLD) / BACK);
     if (!document.getElementById('followFlight').checked) { k = 0; frac3d = 0; }
-    if (u >= 1 && t > tLand + HOLD + BACK) { anim = null; phi = m.phiB; k = 0; frac3d = 0; }
+    if (u >= 1 && tf > flightDur + HOLD + BACK) { anim = null; phi = m.phiB; k = 0; frac3d = 0; }
   }
   draw3D(m, phi, { frac: frac3d, k });
   drawImpact(m);
@@ -948,7 +954,7 @@ function frame(now) {
 let playSpeed = 1;
 const speedEl = document.getElementById('playSpeed');
 speedEl.addEventListener('input', () => { playSpeed = parseFloat(speedEl.value); document.getElementById('playSpeedV').textContent = playSpeed.toFixed(2) + '×'; });
-document.getElementById('play').onclick = () => { const was = anim; anim = { t: 0, last: performance.now() }; if (!was) requestAnimationFrame(frame); };
+document.getElementById('play').onclick = () => { const was = anim; anim = { t: 0, tf: null, last: performance.now() }; if (!was) requestAnimationFrame(frame); };
 document.getElementById('showVec').onchange = render;
 window.addEventListener('resize', render);
 
@@ -1085,7 +1091,7 @@ function diagnose(inp, d) {
       ['Keep the hips back (butt toward the wall) through impact', 'Keep the chest turning through the ball', 'Move ball position forward slightly'],
       'Wall drill: set up with your butt touching a wall and keep contact through impact on practice swings.');
   if (club === 'driver' && has('aoa') && has('path') && inp.aoa < -1 && inp.path < -1)
-    add(faults.has('over-the-top') ? 'over-the-top' : 'oot-path', 1, 'Out-to-in path', `Hitting down (${f1(inp.aoa)}°) shifts the driver path left by about ${(Math.abs(inp.aoa) / Math.tan(47 * D2R)).toFixed(1)}°; hitting up straightens it`, [], [], null);
+    add(faults.has('over-the-top') ? 'over-the-top' : 'oot-path', 1, 'Out-to-in path', `Hitting down (${f1(inp.aoa)}°) already moves the path about ${(Math.abs(inp.aoa) / Math.tan(47 * D2R)).toFixed(1)}° right of your swing direction, so the swing itself is aimed about ${f1(inp.path - Math.abs(inp.aoa) / Math.tan(47 * D2R))}° left. Hitting up without changing that would move the path further left, so pair the AoA fix with swinging more to the right`, [], [], null);
 
   // ---------- start line (face) ----------
   if (has('face') && Math.abs(inp.face) > 3 && (d.f2p === undefined || Math.abs(d.f2p) <= 2.5))
@@ -1393,6 +1399,51 @@ function clubProfile(club, loft) {
   const hx = -0.42;                                  // hosel sits behind the face in this view (heel side)
   return { head, le, ft, hosel: [[hx - 0.3, 0.6], [hx + 0.24, 0.6], [hx + 0.2, 3.1], [hx - 0.2, 3.1]], shaft: [[hx, 3.0], [hx, 40]] };
 }
+// ---- release kinematics: face-on downswing, swing plane flattened. Lead shoulder (hub) -> lead arm -> wrist hinge -> club ----
+// Inches, x toward target from the ball, y up from the hub. Arm angle p from straight down (+ toward target).
+// Wrist hinge h = angle the shaft trails the arm; it releases along a logistic curve and reaches 0 (arm and shaft in line) at the release point.
+const REL = { La: 24, f: 0.88, k: 20, hLag: 90, A: -45, shift: 4, p0: -120, p1: 150, dp: 0.1, depth: -0.25 };
+const REL_PRE = { tour: { pivot: 2, relX: 9.5 }, scoop: { pivot: 2, relX: -6 }, hang: { pivot: -2, relX: 9.5 }, both: { pivot: -2, relX: -6 } };
+const REL_N = Math.round((REL.p1 - REL.p0) / REL.dp);
+// playback clock: slow motion through the impact zone
+const REL_T = (() => { const c = [0]; for (let i = 1; i <= REL_N; i++) { const p = REL.p0 + (i - 0.5) * REL.dp; c.push(c[i - 1] + 1 + 3 * Math.exp(-(((p - 5) / 20) ** 2))); } return c.map(x => x / c[REL_N]); })();
+const relIdx = t => { let lo = 0, hi = REL_N; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (REL_T[m] <= t) lo = m; else hi = m; } return lo; };
+const smooth01 = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+const relHub = (p, pivot) => pivot - REL.shift * (1 - smooth01((p - REL.p0) / 150));   // pressure shift moves the shoulder toward the target
+// arm angle at which the hands reach x (in vs ball)
+function relPhiAt(x, pivot) { let a = -85, b = 70; for (let i = 0; i < 40; i++) { const m = (a + b) / 2; if (relHub(m, pivot) + REL.La * Math.sin(m * D2R) < x) a = m; else b = m; } return (a + b) / 2; }
+const relCache = new Map();
+function relRaw(club, pivot, relX) {
+  const key = `${club}|${pivot}|${relX}`; if (relCache.has(key)) return relCache.get(key);
+  const { La, k, hLag, A } = REL, Lc = CLUBS[club].len * REL.f, pr = relPhiAt(relX, pivot);
+  const c = pr - k * Math.log((hLag - A) / -A - 1), hOf = p => A + (hLag - A) / (1 + Math.exp((p - c) / k));
+  const r = { ph: [], ps: [], ux: [], hx: [], hy: [], cx: [], cy: [] };
+  for (let i = 0; i <= REL_N; i++) {
+    const p = REL.p0 + i * REL.dp, s = p - hOf(p), ux = relHub(p, pivot);
+    const ax = ux + La * Math.sin(p * D2R), ay = -La * Math.cos(p * D2R);
+    r.ph.push(p); r.ps.push(s); r.ux.push(ux); r.hx.push(ax); r.hy.push(ay); r.cx.push(ax + Lc * Math.sin(s * D2R)); r.cy.push(ay - Lc * Math.cos(s * D2R));
+  }
+  let iMinX = 0; for (let i = 0; i < REL_N / 2; i++) if (r.cx[i] < r.cx[iMinX]) iMinX = i;
+  let iImp = iMinX; while (iImp < REL_N && r.cx[iImp] < -BALL_IN) iImp++;   // leading edge reaches the back of the ball
+  const iEnd = Math.round((100 - REL.p0) / REL.dp);
+  let iLow = iMinX; for (let i = iMinX; i < iEnd; i++) if (r.cy[i] < r.cy[iLow]) iLow = i;
+  Object.assign(r, { iMinX, iImp, iLow, minY: r.cy[iLow] });
+  relCache.set(key, r); return r;
+}
+// full result with posture (hub height) and strike
+function relSim(club, pivot, relX, mode) {
+  const r = relRaw(club, pivot, relX), t = REL_PRE.tour, Y0 = REL.depth - relRaw(club, t.pivot, t.relX).minY;
+  const i = r.iImp, a = i - 1, fr = (-BALL_IN - r.cx[a]) / (r.cx[i] - r.cx[a]), at = arr => arr[a] + (arr[i] - arr[a]) * fr;
+  const entryAt = Y => { for (let j = r.iMinX; j < i; j++) if (r.cy[j] + Y < 0) return -r.cx[j]; return 0; };
+  let Y = Y0;
+  if (mode === 'save' && entryAt(Y) > 0.5) { let lo = Y0, hi = Y0 + 6; for (let n = 0; n < 30; n++) { const m = (lo + hi) / 2; if (entryAt(m) > 0.5) lo = m; else hi = m; } Y = hi; }
+  const entry = entryAt(Y), sole = at(r.cy) + Y;
+  const kind = sole > BALL_IN - 0.12 ? 'top' : entry > 0.5 ? 'fat' : BALL_IN - (sole + 0.79) < -0.25 ? 'thin' : 'clean';
+  let d0 = -1, d1 = -1; for (let j = r.iMinX; j < REL_N; j++) { if (r.cy[j] + Y < 0) { if (d0 < 0) d0 = j; d1 = j; } else if (d0 >= 0) break; }
+  const aoa = Math.atan2(r.cy[i] - r.cy[a], r.cx[i] - r.cx[a]) * R2D, ps = at(r.ps);
+  return { ...r, Y, lift: Y - Y0, entry, sole, kind, d0, d1, aoa, lean: -ps, handX: at(r.hx), lag: at(r.ph) - ps,
+    lp: r.cx[r.iLow], bottom: r.minY + Y, dl: CLUBS[club].loft + ps, tImp: REL_T[i] };
+}
 // ---- widget framework ----
 const learnDraws = [];
 function mountWidget(el, spec) {
@@ -1409,7 +1460,7 @@ function mountWidget(el, spec) {
       const sel = div.querySelector('select'); sel.value = c.init;
       sel.addEventListener('input', () => { vals[c.key] = sel.value; if (spec.onChange) applyUpdates(spec.onChange(c.key, vals)); draw(); });
     } else {
-      const fmt = v => (c.signed ? fmtSigned(v, c.dec ?? 1) : v.toFixed(c.dec ?? 1)) + (c.unit || '');
+      const fmt = c.fmt || (v => (c.signed ? fmtSigned(v, c.dec ?? 1) : v.toFixed(c.dec ?? 1)) + (c.unit || ''));
       div.innerHTML = `<label>${c.label} <b></b></label><input type="range" min="${c.min}" max="${c.max}" step="${c.step}" value="${c.init}">`;
       const inp = div.querySelector('input'), b = div.querySelector('b');
       b.textContent = fmt(c.init); sliders[c.key] = { inp, b, fmt };
@@ -1421,6 +1472,7 @@ function mountWidget(el, spec) {
     cv.addEventListener('mousemove', e => { const r = cv.getBoundingClientRect(); hover.x = e.clientX - r.left; hover.y = e.clientY - r.top; draw(); });
     cv.addEventListener('mouseleave', () => { hover.x = null; draw(); });
   }
+  if (spec.mount) spec.mount({ el, vals, set: upd => { applyUpdates(upd); draw(); }, draw: () => draw(), live: () => cv.isConnected });
   function draw() { if (!cv.isConnected || cv.offsetParent === null) return; const { ctx, w, h } = prep(cv); rd.innerHTML = spec.draw(ctx, w, h, vals, hover) || ''; }
   learnDraws.push(draw);
   draw();
@@ -1590,23 +1642,31 @@ const WIDGETS = {
     h: 320,
     controls: [
       { key: 'club', label: 'Club', options: { driver: 'Driver', '7i': '7 iron' }, init: 'driver' },
-      { key: 'path', label: 'Club path', min: -8, max: 8, step: 0.1, init: -4, unit: '°', signed: true },
+      { key: 'hold', label: 'Direction slider sets', options: { path: 'Club path (fixed)', dir: 'Swing direction (fixed)' }, init: 'path' },
+      { key: 'path', label: 'Path / swing direction', min: -8, max: 8, step: 0.1, init: -4, unit: '°', signed: true },
       { key: 'face', label: 'Face angle', min: -8, max: 8, step: 0.1, init: 0, unit: '°', signed: true },
+      { key: 'aoa', label: 'Attack angle', min: -6, max: 6, step: 0.1, init: -0.9, unit: '°', signed: true },
     ],
-    caption: 'Left: impact from overhead (angles ×3 so they are visible). Right: the resulting flight from overhead, true scale.',
+    caption: 'Left: impact from overhead (angles ×3 so they are visible). Right: the resulting flight from overhead, true scale. Swing plane uses the club\'s tour value.',
+    onChange(key, v) { if (key === 'club') return { aoa: PROFILES.tour.clubs[v.club].aoa }; },
     draw(ctx, w, h, v) {
-      const m = learnModel(v.club, { path: v.path, face: v.face });
+      // AoA turns swing direction into path: path = swing direction + shift(AoA, plane)
+      const vsp = PROFILES.tour.clubs[v.club].vsp, shift = arcAt(lpFromAoa(v.aoa, 49, vsp), 49, vsp).pathShift;
+      const path = v.hold === 'dir' ? v.path + shift : v.path, sdir = path - shift;
+      const m = learnModel(v.club, { path, face: v.face, aoa: v.aoa });
       const lw = w * 0.42, ox = lw * 0.35, oy = h * 0.5, EX = 3, Lr = lw * 0.55;
       const ang = a => Math.atan(EX * Math.tan(a * D2R));
       line(ctx, [[8, oy], [lw - 8, oy]], COL.text, 1.2);
       label(ctx, 'target →', lw - 10, oy - 12, COL.text, 'right', false); label(ctx, 'golfer side', lw / 2, 14, COL.muted, 'center', false);
-      const pa = ang(m.path), fa = ang(v.face), sa = ang(m.hla);
+      const pa = ang(m.path), fa = ang(v.face), sa = ang(m.hla), da = ang(sdir);
+      line(ctx, [[ox - Lr * 0.6 * Math.cos(da), oy - Lr * 0.6 * Math.sin(da)], [ox + Lr * 1.1 * Math.cos(da), oy + Lr * 1.1 * Math.sin(da)]], COL.plane, 1.5, [6, 5]);
       arrow(ctx, [ox - Lr * 0.5 * Math.cos(pa), oy - Lr * 0.5 * Math.sin(pa)], [ox + Lr * Math.cos(pa), oy + Lr * Math.sin(pa)], COL.path, 2.5);
       arrow(ctx, [ox, oy], [ox + Lr * 1.1 * Math.cos(sa), oy + Lr * 1.1 * Math.sin(sa)], COL.start, 2, 7);
       line(ctx, [[ox - 22 * Math.sin(fa), oy + 22 * Math.cos(fa) * -1 * -1], [ox + 22 * Math.sin(fa), oy - 22 * Math.cos(fa)]], COL.face, 5);
       arrow(ctx, [ox, oy], [ox + Lr * 0.7 * Math.cos(fa), oy + Lr * 0.7 * Math.sin(fa)], COL.face, 2, 6);
       ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.arc(ox + 6, oy, 6, 0, 7); ctx.fill(); ctx.restore();
-      label(ctx, `path ${fmtSigned(m.path)}°`, 8, h - 56, COL.path); label(ctx, `face ${fmtSigned(v.face)}°`, 8, h - 34, COL.face); label(ctx, `start ${fmtSigned(m.hla)}°`, 8, h - 12, COL.start);
+      label(ctx, `swing dir ${fmtSigned(sdir)}°`, 8, h - 78, COL.plane); label(ctx, `path ${fmtSigned(m.path)}°`, 8, h - 56, COL.path);
+      label(ctx, `face ${fmtSigned(v.face)}°`, 8, h - 34, COL.face); label(ctx, `start ${fmtSigned(m.hla)}°`, 8, h - 12, COL.start);
       // flight overhead
       const f = m.flight, pts = f.pts.map(p => [p.x / YD, p.z / YD]);
       const maxX = Math.max(100, Math.ceil(f.downrange / YD / 50) * 50 + 20), x0 = lw + 30, pw = w - x0 - 16, sx = pw / maxX, cy = h * 0.5;
@@ -1617,7 +1677,8 @@ const WIDGETS = {
       const last = pts[pts.length - 1]; dot2(ctx, [x0 + last[0] * sx, cy + last[1] * sx], 4.5, COL.start);
       label(ctx, `${fmtSigned(last[1], 0)} yd`, x0 + last[0] * sx - 6, cy + last[1] * sx + (last[1] >= 0 ? 16 : -16), COL.start, 'right');
       const curve = (f.side - Math.tan(m.hla * D2R) * f.downrange) / YD;
-      return readout([['Face to path', fmtSigned(m.f2p) + '°'], ['Start line', fmtSigned(m.hla) + '°'], ['Spin axis', fmtSigned(m.spinAxis) + '°'], ['Curve', fmtSigned(curve, 0) + ' yd'], ['Shape', shotShape(m).split(' ·')[0]]]);
+      return readout([['Club path', fmtSigned(m.path) + '°'], ['Face to path', fmtSigned(m.f2p) + '°'], ['Spin loft', m.spinLoft.toFixed(1) + '°'], ['Spin axis', fmtSigned(m.spinAxis) + '°'],
+        ['Start line', fmtSigned(m.hla) + '°'], ['Curve', fmtSigned(curve, 0) + ' yd'], ['Carry', (f.carry / YD).toFixed(0) + ' yd'], ['Shape', shotShape(m).split(' ·')[0]]]);
     },
   },
 
@@ -1705,6 +1766,153 @@ const WIDGETS = {
     },
   },
 
+  // Release timing & pivot -> low point and shaft lean, animated through the downswing (face-on)
+  release: {
+    h: 430,
+    controls: [
+      { key: 'club', label: 'Club', options: { '7i': '7 iron (32°)', '5i': '5 iron (26°)', pw: 'PW (46°)' }, init: '7i' },
+      { key: 'mode', label: 'If the arc bottoms early', options: { fixed: 'Same posture (digs)', save: 'Lifts to miss the turf' }, init: 'fixed' },
+      { key: 'relX', label: 'Arm & shaft line up (hands vs ball)', min: -14, max: 14, step: 0.5, init: REL_PRE.tour.relX, unit: ' in', signed: true },
+      { key: 'pivot', label: 'Lead shoulder at impact (vs ball)', min: -3, max: 6, step: 0.25, init: REL_PRE.tour.pivot, unit: ' in', signed: true, dec: 2 },
+      { key: 't', label: 'Swing position', min: 0, max: 1, step: 0.001, init: 1, fmt: v => { const p = REL.p0 + relIdx(v) * REL.dp; return p < -95 ? 'Top' : p < -12 ? 'Downswing' : p < 25 ? 'Impact zone' : 'Follow-through'; } },
+    ],
+    caption: 'Face-on with the swing plane flattened. Left: the whole swing (blue = clubhead path, dashed = hands). Right: impact zone to scale. Dynamic loft ≈ static loft − shaft lean. Faint dashed path = tour release for comparison.',
+    mount({ el, vals, set, draw, live }) {
+      const bar = document.createElement('div'); bar.className = 'wbtns';
+      bar.innerHTML = `<button data-a="play">▶ Play</button><button data-a="imp">Impact</button><span class="sep"></span><span>Try:</span>
+        <button data-p="tour">Tour (held)</button><button data-p="scoop">Scoop</button><button data-p="hang">Hang back</button><button data-p="both">Scoop + hang back</button>`;
+      el.insertBefore(bar, el.querySelector('.wctl'));
+      const pb = bar.querySelector('[data-a="play"]'); let raf = 0, last = 0;
+      const stop = () => { cancelAnimationFrame(raf); raf = 0; pb.textContent = '▶ Play'; };
+      const tick = now => {
+        if (!live()) return stop();
+        const t = Math.min(1, vals.t + (now - last) / 3600); last = now; set({ t });
+        if (t >= 1) stop(); else raf = requestAnimationFrame(tick);
+      };
+      pb.onclick = () => { if (raf) return stop(); if (vals.t >= 0.999) vals.t = 0; pb.textContent = '❚❚ Pause'; last = performance.now(); raf = requestAnimationFrame(tick); };
+      bar.querySelector('[data-a="imp"]').onclick = () => { stop(); set({ t: relSim(vals.club, vals.pivot, vals.relX, vals.mode).tImp }); };
+      bar.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { stop(); set({ ...REL_PRE[b.dataset.p], t: 1 }); });
+    },
+    draw(ctx, w, h, v) {
+      const r = relSim(v.club, v.pivot, v.relX, v.mode), T = REL_PRE.tour, ref = relSim(v.club, T.pivot, T.relX, 'fixed');
+      const isRef = v.pivot === T.pivot && v.relX === T.relX;
+      const i = relIdx(v.t), Y = r.Y, past = i >= r.iImp;
+      const m = learnModel(v.club, { aoa: r.aoa, dl: clamp(r.dl, 4, 65) });
+      const range = (a, b, step, f) => { const o = []; for (let j = a; j <= b; j += step) o.push(f(j)); return o; };
+
+      // ---- left: whole swing ----
+      const lw = Math.min(w * 0.5, 520), gy = h - 34;
+      const xMin = Math.min(...r.cx, -20), xMax = Math.max(...r.cx, 10), yMax = Math.max(...r.cy) + Y;
+      const sc = Math.min((lw - 24) / (xMax - xMin), (gy - 12) / yMax), ox = lw / 2 - (xMin + xMax) / 2 * sc;
+      const S = (x, y) => [ox + x * sc, gy - y * sc];
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, lw, h); ctx.clip();
+      ctx.fillStyle = '#1a2a1e'; ctx.fillRect(0, gy, lw, h - gy); line(ctx, [[0, gy], [lw, gy]], '#4f7a59', 1.5);
+      // golfer (simple figure, moves with the pivot)
+      const ux = r.ux[i], body = '#3b4943', bw = Math.max(2.5, 1.4 * sc);
+      const neck = [ux - 7.5, Y + 2], hips = [ux - 4, Y - 23], lh = [ux - 0.5, Y - 23], th = [ux - 8, Y - 23];
+      line(ctx, [S(...hips), S(...neck)], body, bw * 1.6);
+      line(ctx, [S(ux - 15, Y - 1), S(ux, Y)], body, bw);
+      line(ctx, [S(...lh), S(ux + 2, Y - 37), S(7, 0)], body, bw * 1.2);
+      line(ctx, [S(...th), S(-9, Y - 38), S(-13, 0)], body, bw * 1.2);
+      ctx.fillStyle = body; ctx.beginPath(); ctx.arc(...S(ux - 8.5, Y + 10), 4.5 * sc, 0, 7); ctx.fill();
+      line(ctx, [S(ux - 15, Y - 1), S(r.hx[i], r.hy[i] + Y)], body, bw);   // trail arm
+      // paths
+      const trace = (s, a, b, xs, ys) => range(a, b, 4, j => S(xs[j], ys[j] + s.Y));
+      if (!isRef) line(ctx, trace(ref, 0, REL_N, ref.cx, ref.cy), 'rgba(228,235,231,0.25)', 1.2, [3, 4]);
+      line(ctx, trace(r, 0, REL_N, r.hx, r.hy), 'rgba(139,155,148,0.45)', 1.2, [4, 4]);
+      line(ctx, trace(r, 0, REL_N, r.cx, r.cy), 'rgba(74,168,255,0.3)', 1.5);
+      line(ctx, trace(r, 0, i, r.cx, r.cy), COL.path, 2);
+      // impact pose ghost
+      const ix = r.iImp, gh = [S(r.ux[ix], Y), S(r.hx[ix], r.hy[ix] + Y), S(r.cx[ix], r.cy[ix] + Y)];
+      line(ctx, gh, 'rgba(255,212,92,0.45)', 1.5, [5, 4]);
+      // current arm + club
+      const sh = S(ux, Y), hd = S(r.hx[i], r.hy[i] + Y), ch = S(r.cx[i], r.cy[i] + Y);
+      line(ctx, [sh, hd], '#c9d1cd', Math.max(3, 1.6 * sc));
+      line(ctx, [hd, ch], '#9aa5a0', Math.max(1.5, 0.5 * sc));
+      dot2(ctx, hd, Math.max(3, 1.3 * sc), '#e4ebe7'); dot2(ctx, ch, Math.max(3.5, 1.4 * sc), COL.face);
+      dot2(ctx, S(0, BALL_IN), Math.max(2.5, BALL_IN * sc), '#ffffff');
+      // low point marker
+      const lpS = S(r.lp, 0); line(ctx, [[lpS[0], gy - 10], [lpS[0], gy + 8]], COL.low, 2);
+      label(ctx, `low point ${fmtSigned(r.lp)} in`, lpS[0], gy + 15, COL.low, 'center');
+      // zoom window outline
+      const z0 = S(-9, 5.5), z1 = S(11, -1.2);
+      ctx.save(); ctx.strokeStyle = 'rgba(228,235,231,0.25)'; ctx.setLineDash([2, 3]); ctx.strokeRect(z0[0], z0[1], z1[0] - z0[0], z1[1] - z0[1]); ctx.restore();
+      const ph = r.ph[i];
+      label(ctx, ph < -95 ? 'Top' : i < r.iImp - 15 ? 'Downswing' : Math.abs(i - r.iImp) <= 15 ? 'Impact' : 'Follow-through', 12, 16, COL.text, 'left');
+      label(ctx, `wrist hinge ${Math.round(r.ph[i] - r.ps[i])}°`, 12, 38, COL.muted, 'left');
+      ctx.restore();
+
+      // ---- right: impact zone, to scale ----
+      const rx = lw + 14, rw = w - rx - 10, zs = rw / 20, zgy = h - 70, Z = (x, y) => [rx + (x + 9) * zs, zgy - y * zs];
+      ctx.save(); ctx.beginPath(); ctx.rect(rx, 0, rw, h); ctx.clip();
+      const tg = ctx.createLinearGradient(0, zgy, 0, h); tg.addColorStop(0, '#2c4a33'); tg.addColorStop(1, '#1a2a1e');
+      ctx.fillStyle = tg; ctx.fillRect(rx, zgy, rw, h - zgy);
+      // divot (only the part already dug)
+      if (r.d0 >= 0 && i > r.d0) {
+        const e = Math.min(i, r.d1), pts = range(r.d0, e, 2, j => Z(r.cx[j], r.cy[j] + Y));
+        ctx.fillStyle = COL.dirt; ctx.beginPath(); ctx.moveTo(...Z(r.cx[r.d0], 0)); pts.forEach(q => ctx.lineTo(...q)); ctx.lineTo(...Z(r.cx[e], 0)); ctx.closePath(); ctx.fill();
+      }
+      line(ctx, [[rx, zgy], [rx + rw, zgy]], '#4f7a59', 1.5);
+      // inch ticks
+      ctx.save(); ctx.font = '10px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+      for (let x = -8; x <= 10; x += 2) { const q = Z(x, 0); line(ctx, [[q[0], zgy], [q[0], zgy + 4]], 'rgba(255,255,255,0.3)', 1); ctx.fillText((x > 0 ? '+' : '') + x, q[0], zgy + 15); }
+      ctx.fillText('inches from the ball', rx + rw / 2, zgy + 29); ctx.restore();
+      // sole paths: tour reference + this swing
+      const zt = (s, a, b) => range(a, b, 1, j => (s.cx[j] > -10 && s.cx[j] < 12) ? Z(s.cx[j], s.cy[j] + s.Y) : null);
+      if (!isRef) line(ctx, zt(ref, ref.iMinX, REL_N), 'rgba(228,235,231,0.3)', 1.2, [3, 4]);
+      line(ctx, zt(r, r.iMinX, REL_N), 'rgba(74,168,255,0.35)', 1.5);
+      if (i > r.iMinX) line(ctx, zt(r, r.iMinX, i), COL.path, 2.5);
+      // low point
+      const lq = Z(r.lp, r.bottom); dot2(ctx, lq, 5, COL.panel); dot2(ctx, lq, 3.5, COL.low);
+      line(ctx, [Z(r.lp, r.bottom), Z(r.lp, -1.2)], COL.low, 1.5, [3, 3]);
+      // ball: leaves after impact
+      const la = (r.kind === 'top' ? 1 : m.vla) * D2R, go = past ? Math.max(0, r.cx[i] + BALL_IN) * 1.5 : 0;
+      const bc = Z(go * Math.cos(la), BALL_IN + go * Math.sin(la)), br = BALL_IN * zs;
+      const bgr = ctx.createRadialGradient(bc[0] - br * 0.35, bc[1] - br * 0.35, br * 0.1, bc[0], bc[1], br);
+      bgr.addColorStop(0, '#ffffff'); bgr.addColorStop(1, '#c9cfcc'); ctx.fillStyle = bgr; ctx.beginPath(); ctx.arc(bc[0], bc[1], br, 0, 7); ctx.fill();
+      // club head, to scale, rotated by the shaft lean of this frame
+      const parts = clubProfile(v.club, CLUBS[v.club].loft);
+      const pose = j => {
+        const a = -r.ps[j] * D2R, rot = q => [q[0] * Math.cos(a) + q[1] * Math.sin(a), -q[0] * Math.sin(a) + q[1] * Math.cos(a)];
+        const hd = parts.head.map(rot), dy = r.cy[j] + Y - Math.min(...hd.map(q => q[1])), mv = q => [q[0] + r.cx[j], q[1] + dy];
+        return { head: hd.map(mv), shaft: parts.shaft.map(q => mv(rot(q))), hosel: parts.hosel.map(q => mv(rot(q))), le: mv(rot(parts.le)), ft: mv(rot(parts.ft)) };
+      };
+      const zpoly = (pts, fill, stroke, dash) => { ctx.save(); ctx.beginPath(); pts.forEach((q, k) => { const p = Z(...q); k ? ctx.lineTo(...p) : ctx.moveTo(...p); }); ctx.closePath();
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; if (dash) ctx.setLineDash(dash); ctx.stroke(); } ctx.restore(); };
+      const near = r.cx[i] > -13 && r.cx[i] < 15 && Math.abs(r.ps[i]) < 60;
+      const pi = pose(r.iImp);
+      if (!near || Math.abs(i - r.iImp) > 3) {                     // impact pose ghost
+        line(ctx, pi.shaft.map(q => Z(...q)), 'rgba(255,212,92,0.4)', 1.5, [5, 4]); zpoly(pi.head, null, 'rgba(255,212,92,0.45)', [4, 3]);
+      }
+      if (near) {
+        const P = pose(i);
+        ctx.save(); ctx.strokeStyle = '#9aa5a0'; ctx.lineWidth = 0.37 * zs; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(...Z(...P.shaft[0])); ctx.lineTo(...Z(...P.shaft[1])); ctx.stroke(); ctx.restore();
+        zpoly(P.hosel, '#7f8a85', '#c9d1cd');
+        const hg = ctx.createLinearGradient(...Z(...P.le), ...Z(P.le[0] - 2, P.le[1] + 2)); hg.addColorStop(0, '#d9e0dc'); hg.addColorStop(1, '#8e9894');
+        zpoly(P.head, hg, '#eef2f0'); line(ctx, [Z(...P.le), Z(...P.ft)], COL.face, Math.max(3, 0.12 * zs));
+      }
+      // shaft lean at impact: vertical reference and angle
+      const sb = pi.shaft[0], top = [sb[0], sb[1] + 9];
+      line(ctx, [Z(...sb), Z(...top)], 'rgba(228,235,231,0.35)', 1, [2, 3]);
+      label(ctx, `shaft lean at impact ${fmtSigned(r.lean)}°`, rx + 10, 16, COL.start, 'left');
+      label(ctx, `impact zone · to scale`, rx + rw - 8, 16, COL.muted, 'right', false);
+      label(ctx, `low point ${fmtSigned(r.lp)} in`, clamp(lq[0], rx + 60, rx + rw - 60), zgy + 46, COL.low, 'center');
+      ctx.restore();
+
+      const good = r.kind === 'clean';
+      return readout([
+        ['Low point', `${fmtSigned(r.lp)} in`, r.lp > 1.5 ? 'good' : r.lp < 0 ? 'bad' : ''],
+        ['Hands at impact', `${fmtSigned(r.handX)} in`],
+        ['Shaft lean', `${fmtSigned(r.lean)}°`, r.lean < 0 ? 'bad' : ''],
+        ['Hinge left at impact', `${Math.round(r.lag)}°`],
+        ['Attack angle', `${fmtSigned(r.aoa)}°`],
+        ['Dynamic loft', `${r.dl.toFixed(1)}°`],
+        ['Strike', STRIKE_NAME[r.kind] + (r.kind === 'fat' ? ` (${r.entry.toFixed(1)} in early)` : r.lift > 0.05 ? ` (lifted ${r.lift.toFixed(1)} in)` : ''), good ? 'good' : 'bad'],
+        ['Launch / spin', `${m.vla.toFixed(1)}° · ${Math.round(m.spin).toLocaleString()} rpm`],
+      ]);
+    },
+  },
+
   // Driver carry map: launch x spin heatmap
   window: {
     h: 360, hover: true,
@@ -1788,7 +1996,7 @@ const TOPICS = [
     <p>The arc is tilted (that's the swing plane), so it isn't a vertical circle. Before the low point the club is moving down <i>and</i> outward from the golfer; after it the club moves up and back inward. Hitting down therefore pushes the path to the right (in-to-out for a right-hander), and hitting up pulls it left, even with the same swing direction.</p>
     <div data-widget="aoaPath"></div>
     <p>TrackMan's rule of thumb: <b>path ≈ swing direction − AoA ÷ tan(plane)</b>. On a 60° iron plane each degree down moves the path about 0.6° right. On a flatter 47° driver plane it's about 0.9°.</p>
-    <div class="callout"><b>Why it matters:</b> a driver hit 4° down can produce a path about 4° left of where the golfer aims the swing, and that builds a slice. Teeing it higher and hitting up straightens the path with no other change.</div>` },
+    <div class="callout"><b>Why it matters:</b> on a 47° driver plane, hitting 4° <i>up</i> moves the path about 3.7° left of the swing direction. A golfer who starts hitting up for distance but keeps swinging straight at the target will start hitting pull-fades. Good players swing slightly right with the driver and slightly left with irons for exactly this reason.</div>` },
   { id: 'lowpoint', title: 'Low point & strike', sub: 'Fat, thin, and your margin for error', html: `
     <h1>Low point & strike</h1>
     <p class="lede">Low point has two parts: <b>where</b> it is front to back, and <b>how deep</b> it is relative to the ground. Together they decide whether the club meets the ball first, the turf first, or the ball's equator.</p>
@@ -1816,7 +2024,13 @@ const TOPICS = [
       <li><b>Face to path</b> (face minus path) sets curvature. Positive curves right, negative curves left.</li>
       <li>The same face-to-path curves <b>more with a driver</b> than a 7 iron, because the driver's lower spin loft tilts the spin axis further.</li>
     </ul>
-    <div class="callout"><b>Try it:</b> with the driver at path −4° and face 0°, the face is 4° open to the path. The ball starts almost straight and slices well right. Now drag the face to −4° to match the path: the curve disappears, but it's a straight pull. The real fix is the path. Set path 0° and face 0°.</div>` },
+    <h2>Where attack angle fits in</h2>
+    <p>Attack angle affects the D-plane in two ways:</p>
+    <ul>
+      <li><b>It moves the path.</b> Set "Direction slider sets" to <i>swing direction</i>. With the swing direction held fixed, hitting down moves the club path right and hitting up moves it left, so face-to-path and curve change even though the face and swing are unchanged. With a square face and the swing aimed at the target, a driver hit 3° up has its path about 3° left, so it fades. Hit 3° down and it draws.</li>
+      <li><b>It changes spin loft.</b> Hitting up with a driver lowers spin loft, so there's less backspin to resist side spin. The same face-to-path then tilts the spin axis further and curves the ball a little more, but it also carries farther.</li>
+    </ul>
+    <div class="callout"><b>Try it:</b> hold swing direction at 0°, face 0°, and drag attack angle from −4° to +4°. The ball goes from a hook (path right of the face) to a slice (path left of the face), about 30 yd of curve each way, without touching the face or the swing direction. Next, with the driver at path −4° and face 0°, the face is 4° open to the path. The ball starts almost straight and slices well right. Now drag the face to −4° to match the path: the curve disappears, but it's a straight pull. The real fix is the path. Set path 0° and face 0°.</div>` },
   { id: 'loft', title: 'Dynamic loft & spin loft', sub: 'What really creates launch and spin', html: `
     <h1>Dynamic loft & spin loft</h1>
     <p class="lede"><b>Dynamic loft</b> is how much loft the face actually has at impact. <b>Spin loft</b> is the angle between the face and the path. Launch comes mostly from dynamic loft; spin comes mostly from spin loft.</p>
@@ -1827,6 +2041,22 @@ const TOPICS = [
       <li><b>Flipping</b> (negative lean) adds loft: high, weak, spinny shots.</li>
     </ul>
     <div class="callout"><b>Driver takeaway:</b> hitting up lets you launch the ball high with a <i>small</i> spin loft, which is the recipe for high launch and low spin.</div>` },
+  { id: 'release', title: 'Release, low point & shaft lean', sub: 'What holding the angle actually does', html: `
+    <h1>Release, low point & shaft lean</h1>
+    <p class="lede">The clubhead bottoms out shortly after the lead arm and shaft line up. Hold the wrist hinge a little longer and that happens after the ball: the low point moves forward and the shaft leans toward the target at impact. Release it early and the clubhead catches the hands before the ball, so the low point moves back and the shaft leans away from the target.</p>
+    <div data-widget="release"></div>
+    <h2>Two ways to move the low point</h2>
+    <ul>
+      <li><b>Release timing</b> (where the arm and shaft line up). Lining them up 2 in later moves the low point about 0.7 in forward and adds about 1.8° of shaft lean. Most of your shaft lean comes from here.</li>
+      <li><b>Pivot</b> (where the lead shoulder is at impact). Moving it 1 in toward the target moves the low point about 0.7 in forward but adds only about 0.5° of lean. The pivot carries the whole arc forward, hands included.</li>
+    </ul>
+    <h2>Is shaft lean automatic?</h2>
+    <p>Mostly, yes. When the pivot gets the lead shoulder ahead of the ball and some hinge is still left at impact, the hands arrive ahead of the clubhead and the shaft leans forward with no extra effort. In the tour preset the hands are about 5 in ahead of the ball with about 18° of hinge left, which gives about 10° of lean and 22° of dynamic loft on a 32° 7 iron.</p>
+    <p>Both pieces matter. Press <b>Hang back</b>: the hinge is still held, so the shaft still leans about 8°, but with the shoulder behind the ball the low point is only 2 in ahead and the strike comes up thin. Lean without pivot doesn't move the bottom far enough.</p>
+    <h2>What scooping does</h2>
+    <p>Scooping (flipping) means the clubhead passes the hands before impact. In the <b>Scoop</b> preset the low point moves from 4.5 in ahead to just behind the ball, the shaft leans about 3° backward, and the 7 iron arrives with about 35° of loft instead of 22°. With the same posture the club reaches the turf about 6–7 in early: fat. A scooper who learns to avoid the ground does it by lifting, which saves the contact and keeps the extra loft: high, weak, spinny shots, and thin ones when the lift overshoots.</p>
+    <div class="callout"><b>Try it:</b> press Play on the tour preset, then on Scoop, and watch the wrist-hinge readout in the top-left. In the tour swing about 18° of hinge is left at impact. In the scoop it is gone before the ball and goes negative as the clubhead passes the hands. Then switch "If the arc bottoms early" to see the fat-or-lift choice a scooper faces.</div>
+    <p class="hint">Simplified model: one flat plane, a straight lead arm, and a smooth release curve. Real swings add forearm rotation and the trail arm, so treat the numbers as directions and sizes.</p>` },
   { id: 'window', title: 'Launch & spin window', sub: 'Optimizing driver carry for your speed', html: `
     <h1>Launch & spin window</h1>
     <p class="lede">For every club speed there is a combination of launch and spin that carries the ball farthest. Too little spin and the ball falls out of the sky; too much and it balloons and loses distance.</p>
