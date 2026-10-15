@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Golf Swing Model</title>
+<style>
+:root{
+  --bg:#0e1311; --panel:#151c19; --panel2:#1b2420; --line:#27322d; --text:#e4ebe7; --muted:#8b9b94;
+  --accent:#5fd39a; --path:#4aa8ff; --face:#ff8a4a; --plane:#b48cff; --start:#ffd45c; --low:#ff5c7a; --dirt:#6b4f33;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:baseline;gap:16px;padding:14px 20px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+header span{color:var(--muted);font-size:13px}
+.app{display:grid;grid-template-columns:320px 1fr;gap:14px;padding:14px}
+aside{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 10px;font-weight:600}
+.ctrl{margin:0 0 10px}
+.ctrl .row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px}
+.ctrl .row b{font-variant-numeric:tabular-nums;font-weight:600}
+.ctrl small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover,select:hover{border-color:#3d4a44}
+button.primary{background:var(--accent);color:#0b1a12;border-color:var(--accent);font-weight:650}
+.clubs{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:12px}
+.clubs button{padding:6px 0;font-size:12px}
+.clubs button.on{background:var(--accent);color:#0b1a12;border-color:var(--accent);font-weight:650}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.m{background:var(--panel2);border-radius:7px;padding:6px 9px}
+.m .k{font-size:11px;color:var(--muted)}
+.m .v{font-size:16px;font-weight:650;font-variant-numeric:tabular-nums}
+.m .v i{font-style:normal;font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
+.shape{margin-top:8px;padding:8px 10px;border-radius:7px;background:var(--panel2);font-weight:600;text-align:center}
+main{display:grid;grid-template-rows:auto auto;gap:14px;min-width:0}
+.view{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.view .bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.view .bar h3{margin:0;font-size:13px;font-weight:600;margin-right:auto}
+.view .bar button{padding:4px 9px;font-size:12px}
+.view .bar label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px}
+canvas{display:block;width:100%}
+#c3d{height:460px;cursor:grab}
+#c3d:active{cursor:grabbing}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.grid3 canvas{height:330px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+.legend span::before{content:"";display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle;background:var(--c)}
+.formula{font-size:12px;color:var(--muted);line-height:1.6}
+.formula code{color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+@media (max-width:1250px){.grid3{grid-template-columns:1fr}}
+@media (max-width:860px){.app{grid-template-columns:1fr}#c3d{height:360px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Golf Swing Model</h1>
+  <span>Inclined-plane swing arc · D-plane impact · ball-flight simulation (right-handed golfer)</span>
+</header>
+
+<div class="app">
+  <aside>
+    <div class="card">
+      <h2>Club</h2>
+      <div class="clubs" id="clubs"></div>
+      <div id="sliders"></div>
+    </div>
+    <div class="card">
+      <h2>Club delivery</h2>
+      <div class="metrics" id="mClub"></div>
+    </div>
+    <div class="card">
+      <h2>Ball</h2>
+      <div class="metrics" id="mBall"></div>
+      <div class="shape" id="shape"></div>
+    </div>
+    <div class="card formula" id="formula"></div>
+  </aside>
+
+  <main>
+    <div class="view">
+      <div class="bar">
+        <h3>3D swing plane</h3>
+        <button data-cam="dtl">Down the line</button>
+        <button data-cam="fo">Face on</button>
+        <button data-cam="top">Overhead</button>
+        <label><input type="checkbox" id="showVec" checked> Impact vectors</label>
+        <button class="primary" id="play">▶ Play swing</button>
+      </div>
+      <canvas id="c3d"></canvas>
+      <div class="legend">
+        <span style="--c:#e4ebe7">Target line</span>
+        <span style="--c:var(--plane)">Swing plane / swing direction</span>
+        <span style="--c:var(--accent)">Clubhead arc</span>
+        <span style="--c:var(--path)">Club path (velocity)</span>
+        <span style="--c:var(--face)">Face normal</span>
+        <span style="--c:var(--low)">Low point</span>
+        <span style="color:var(--muted)">Drag to orbit · scroll to zoom</span>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <div class="view">
+        <div class="bar"><h3>Face-on impact · low point &amp; AoA</h3></div>
+        <canvas id="cImpact"></canvas>
+      </div>
+      <div class="view">
+        <div class="bar"><h3>Overhead impact · path &amp; face</h3></div>
+        <canvas id="cTop"></canvas>
+      </div>
+      <div class="view">
+        <div class="bar"><h3>Ball flight</h3></div>
+        <canvas id="cFlight"></canvas>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script id="physics">
+// ---------- vector math ----------
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const IN = 0.0254, MPH = 0.44704, YD = 0.9144, FT = 0.3048;
+const BALL_R = 0.02135, BALL_M = 0.04593;
+const V = (x, y, z) => ({ x, y, z });
+const add = (a, b) => V(a.x + b.x, a.y + b.y, a.z + b.z);
+const sub = (a, b) => V(a.x - b.x, a.y - b.y, a.z - b.z);
+const mul = (a, s) => V(a.x * s, a.y * s, a.z * s);
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const cross = (a, b) => V(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+const len = a => Math.hypot(a.x, a.y, a.z);
+const norm = a => { const l = len(a) || 1; return mul(a, 1 / l); };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// World frame (right-handed): x = toward target, y = up, z = right of target line
+// (away from a right-handed golfer, who stands on the -z side). Ball sits at the origin.
+
+// len: shaft length (in); ballBottom: height of ball bottom (m, tee); faceH: face-centre height above sole (m)
+const CLUBS = {
+  driver: { name: 'Driver', len: 45.5,  loft: 10.5, vsp: 48, speed: 105, lp: -3.5, dl: 14, hsp: 2.3, face: 0, ballBottom: 0.030, faceH: 0.030 },
+  '3w':   { name: '3W',     len: 43.0,  loft: 15,   vsp: 52, speed: 98,  lp: -0.5, dl: 17, hsp: 0.3, face: 0, ballBottom: 0.008, faceH: 0.020 },
+  '5i':   { name: '5i',     len: 38.0,  loft: 26,   vsp: 58, speed: 90,  lp: 3.5,  dl: 22, hsp: -2.1, face: 0, ballBottom: 0,     faceH: 0.020 },
+  '7i':   { name: '7i',     len: 37.0,  loft: 32,   vsp: 60, speed: 85,  lp: 4.0,  dl: 25, hsp: -2.3, face: 0, ballBottom: 0,     faceH: 0.020 },
+  pw:     { name: 'PW',     len: 35.75, loft: 46,   vsp: 62, speed: 78,  lp: 4.0,  dl: 40, hsp: -2.3, face: 0, ballBottom: 0,     faceH: 0.020 },
+  sw:     { name: 'SW',     len: 35.25, loft: 56,   vsp: 64, speed: 70,  lp: 3.5,  dl: 52, hsp: -1.9, face: 0, ballBottom: 0,     faceH: 0.020 },
+};
+
+// Ball flight: drag + Magnus lift, spin decay. Returns positions in metres.
+function simulateFlight(speed, dir, spinAxis, rpm) {
+  const rho = 1.2, A = Math.PI * BALL_R * BALL_R, g = 9.81, dt = 0.005;
+  let p = V(0, 0, 0), v = mul(dir, speed), w = rpm * 2 * Math.PI / 60, t = 0;
+  const pts = [{ ...p, t: 0 }];
+  let apex = 0;
+  while (t < 15) {
+    const s = len(v);
+    const S = BALL_R * w / s;
+    const Cd = 0.19 + 0.62 * Math.min(S, 0.4);
+    const Sc = Math.min(S, 0.3);
+    const Cl = 1.99 * Sc - 3.25 * Sc * Sc;
+    const k = 0.5 * rho * A * s / BALL_M;
+    const lift = norm(cross(spinAxis, v));
+    const acc = add(add(mul(v, -k * Cd), mul(lift, k * Cl * s)), V(0, -g, 0));
+    v = add(v, mul(acc, dt));
+    p = add(p, mul(v, dt));
+    w *= Math.exp(-dt / 25);
+    t += dt;
+    apex = Math.max(apex, p.y);
+    if (Math.round(t / dt) % 4 === 0) pts.push({ ...p, t });
+    if (p.y < 0 && v.y < 0) break;
+  }
+  const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+  if (last !== undefined && last.y !== p.y) pts.push({ ...p, t });
+  const landAngle = Math.atan2(-v.y, Math.hypot(v.x, v.z)) * R2D;
+  return { pts, carry: Math.hypot(p.x, p.z), side: p.z, downrange: p.x, apex, landAngle, time: t };
+}
+
+function computeModel(s) {
+  const c = CLUBS[s.club];
+  const R = s.radius * IN;
+  const th = s.vsp * D2R, h = s.hsp * D2R;
+  const d = V(Math.cos(h), 0, Math.sin(h));          // plane line (swing direction), horizontal
+  const e = V(-Math.sin(h), 0, Math.cos(h));         // horizontal, right of plane line
+  const up = V(-Math.cos(th) * e.x, Math.sin(th), -Math.cos(th) * e.z); // up the plane, toward golfer
+  const ballC = V(BALL_R, c.ballBottom + BALL_R, 0);
+  const soleY = Math.max(0, ballC.y - c.faceH);
+  const I = V(0, soleY, 0);                           // clubhead (sole) at impact
+  const phiB = Math.asin(clamp(-s.lp * IN / R, -0.95, 0.95)); // arc angle at impact (0 = low point)
+  const off = phi => add(mul(d, R * Math.sin(phi)), mul(up, R * (1 - Math.cos(phi))));
+  const LP = sub(I, off(phiB));
+  const C = add(LP, mul(up, R));                      // swing centre (effective pivot)
+  const pt = phi => add(LP, off(phi));
+  const vel = phi => add(mul(d, Math.cos(phi)), mul(up, Math.sin(phi)));
+  const P = vel(phiB);                                // unit club-path vector at impact
+  const aoa = Math.asin(P.y) * R2D;
+  const path = Math.atan2(P.z, P.x) * R2D;
+  const DL = s.dl * D2R, FA = s.face * D2R;
+  const F = V(Math.cos(DL) * Math.cos(FA), Math.sin(DL), Math.cos(DL) * Math.sin(FA)); // face normal
+  const spinLoftR = Math.acos(clamp(dot(P, F), -1, 1));
+  const spinLoft = spinLoftR * R2D;
+  const f2p = s.face - path;
+  let axis = cross(P, F);
+  axis = len(axis) < 1e-6 ? V(0, 0, 1) : norm(axis);
+  const spinAxis = Math.atan2(-axis.y, axis.z) * R2D; // + = tilted right (fade/slice)
+  const smash = 1.50 * Math.pow(Math.cos(Math.min(spinLoftR, 1.4)), 0.6);
+  const ballMph = s.speed * smash;
+  const spin = ballMph * spinLoft * Math.min(2.3, 1.1 + 0.03 * spinLoft);
+  const kf = 0.86 - 0.002 * spinLoft;
+  const L = norm(add(mul(P, 1 - kf), mul(F, kf)));    // launch direction lies in the D-plane
+  const vla = Math.asin(L.y) * R2D, hla = Math.atan2(L.z, L.x) * R2D;
+  const flight = simulateFlight(ballMph * MPH, L, axis, spin);
+  return {
+    c, R, th, d, e, up, I, LP, C, pt, vel, phiB, P, F, L, axis, ballC,
+    aoa, path, f2p, spinLoft, spinAxis, smash, ballMph, spin, vla, hla, flight,
+    lowDepth: LP.y, approxPath: s.hsp - aoa / Math.tan(th),
+  };
+}
+</script>
+
+<script>
+// ---------- state & controls ----------
+const state = { club: '7i', speed: 85, vsp: 60, hsp: -2.3, lp: 4, dl: 25, face: 0, radius: 49, exag: 3 };
+
+const SLIDERS = [
+  ['speed', 'Club speed', 50, 130, 1, 'mph', ''],
+  ['lp', 'Low point', -8, 8, 0.1, 'in', '+ ahead of ball (hitting down), − behind (hitting up)'],
+  ['vsp', 'Swing plane (vertical)', 35, 75, 0.5, '°', 'Plane inclination from the ground'],
+  ['hsp', 'Swing direction (horizontal)', -10, 10, 0.1, '°', '+ right of target (out-to-in → in-to-out is via path)'],
+  ['dl', 'Dynamic loft', 4, 65, 0.5, '°', 'Face loft at impact, relative to the horizon'],
+  ['face', 'Face angle', -10, 10, 0.1, '°', '+ open / right of target'],
+  ['radius', 'Effective swing radius', 36, 80, 0.5, 'in', 'Pivot-to-clubhead; sets how fast AoA changes with low point'],
+  ['exag', 'Impact view exaggeration', 1, 6, 0.5, '×', 'Vertical (face-on) and lateral (overhead) scale'],
+];
+SLIDERS[3][6] = '+ right of target, − left';
+
+const slidersEl = document.getElementById('sliders');
+for (const [key, label, min, max, step, unit, help] of SLIDERS) {
+  const div = document.createElement('div');
+  div.className = 'ctrl';
+  div.innerHTML = `<div class="row"><span>${label}</span><b id="v_${key}"></b></div>
+    <input type="range" id="s_${key}" min="${min}" max="${max}" step="${step}">
+    ${help ? `<small>${help}</small>` : ''}`;
+  slidersEl.appendChild(div);
+  const inp = div.querySelector('input');
+  inp.addEventListener('input', () => { state[key] = parseFloat(inp.value); syncControls(); render(); });
+}
+const fmtSigned = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d);
+function syncControls() {
+  for (const [key, , , , step, unit] of SLIDERS) {
+    document.getElementById('s_' + key).value = state[key];
+    const dec = step < 1 ? 1 : 0;
+    const signed = ['lp', 'hsp', 'face'].includes(key);
+    document.getElementById('v_' + key).textContent = (signed ? fmtSigned(state[key], dec) : state[key].toFixed(dec)) + ' ' + unit;
+  }
+  document.querySelectorAll('#clubs button').forEach(b => b.classList.toggle('on', b.dataset.club === state.club));
+}
+const clubsEl = document.getElementById('clubs');
+for (const [key, c] of Object.entries(CLUBS)) {
+  const b = document.createElement('button');
+  b.textContent = c.name; b.dataset.club = key;
+  b.onclick = () => {
+    Object.assign(state, { club: key, speed: c.speed, vsp: c.vsp, hsp: c.hsp, lp: c.lp, dl: c.dl, face: c.face, radius: c.len + 12 });
+    syncControls(); render();
+  };
+  clubsEl.appendChild(b);
+}
+
+// ---------- drawing helpers ----------
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const COL = {};
+['--text', '--muted', '--accent', '--path', '--face', '--plane', '--start', '--low', '--dirt', '--line', '--panel'].forEach(k => COL[k.slice(2)] = css(k));
+
+function prep(cv) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  return { ctx, w: r.width, h: r.height };
+}
+function line(ctx, pts, color, w = 1.5, dash = null) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = w; if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); let started = false;
+  for (const p of pts) { if (!p) { started = false; continue; } if (!started) { ctx.moveTo(p[0], p[1]); started = true; } else ctx.lineTo(p[0], p[1]); }
+  ctx.stroke(); ctx.restore();
+}
+function arrow(ctx, a, b, color, w = 2, head = 8) {
+  if (!a || !b) return;
+  line(ctx, [a, b], color, w);
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  ctx.save(); ctx.fillStyle = color; ctx.beginPath();
+  ctx.moveTo(b[0], b[1]);
+  ctx.lineTo(b[0] - head * Math.cos(ang - 0.4), b[1] - head * Math.sin(ang - 0.4));
+  ctx.lineTo(b[0] - head * Math.cos(ang + 0.4), b[1] - head * Math.sin(ang + 0.4));
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function label(ctx, text, x, y, color, align = 'left', bg = true) {
+  ctx.save(); ctx.font = '600 12px -apple-system,BlinkMacSystemFont,sans-serif'; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  if (bg) {
+    const w = ctx.measureText(text).width + 8;
+    const x0 = align === 'left' ? x - 4 : align === 'right' ? x - w + 4 : x - w / 2;
+    ctx.fillStyle = 'rgba(14,19,17,0.78)'; ctx.fillRect(x0, y - 9, w, 18);
+  }
+  ctx.fillStyle = color; ctx.fillText(text, x, y); ctx.restore();
+}
+function dot2(ctx, p, r, color) { if (!p) return; ctx.save(); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 7); ctx.fill(); ctx.restore(); }
+
+// ---------- 3D view ----------
+const cam = { yaw: 192 * D2R, pitch: 14 * D2R, dist: 4.6, target: V(0.1, 0.55, -0.45) };
+const CAMS = { dtl: [192, 14, 4.6], fo: [90, 8, 4.6], top: [180, 88, 5.2] };
+document.querySelectorAll('[data-cam]').forEach(b => b.onclick = () => {
+  const [y, p, d] = CAMS[b.dataset.cam]; cam.yaw = y * D2R; cam.pitch = p * D2R; cam.dist = d; render();
+});
+const c3d = document.getElementById('c3d');
+let drag = null;
+c3d.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; c3d.setPointerCapture(e.pointerId); });
+c3d.addEventListener('pointermove', e => {
+  if (!drag) return;
+  cam.yaw += (e.clientX - drag[0]) * 0.008;
+  cam.pitch = clamp(cam.pitch + (e.clientY - drag[1]) * 0.006, -0.1, 1.55);
+  drag = [e.clientX, e.clientY]; render();
+});
+c3d.addEventListener('pointerup', () => drag = null);
+c3d.addEventListener('wheel', e => { e.preventDefault(); cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.001), 1.2, 14); render(); }, { passive: false });
+
+function makeProj(w, h) {
+  const cp = Math.cos(cam.pitch);
+  const pos = add(cam.target, mul(V(cp * Math.cos(cam.yaw), Math.sin(cam.pitch), cp * Math.sin(cam.yaw)), cam.dist));
+  const fwd = norm(sub(cam.target, pos));
+  let right = cross(fwd, V(0, 1, 0));
+  right = len(right) < 1e-6 ? V(0, 0, 1) : norm(right);
+  const upv = cross(right, fwd);
+  const f = Math.min(w, h * 1.6) * 0.85;
+  const proj = p => { const r = sub(p, pos); const z = dot(r, fwd); if (z < 0.05) return null; return [w / 2 + dot(r, right) * f / z, h / 2 - dot(r, upv) * f / z, z]; };
+  proj.f = f;
+  return proj;
+}
+
+function draw3D(m, phiNow) {
+  const { ctx, w, h } = prep(c3d);
+  const P = makeProj(w, h);
+  // ground grid
+  for (let i = -3; i <= 4; i += 0.5) line(ctx, [P(V(i, 0, -3)), P(V(i, 0, 2))], 'rgba(255,255,255,0.05)', 1);
+  for (let j = -3; j <= 2; j += 0.5) line(ctx, [P(V(-3, 0, j)), P(V(4, 0, j))], 'rgba(255,255,255,0.05)', 1);
+  // target line
+  line(ctx, [P(V(-3, 0, 0)), P(V(5, 0, 0))], COL.text, 1.5);
+  const tl = P(V(4.6, 0, 0)); if (tl) label(ctx, 'Target', tl[0], tl[1] - 12, COL.text, 'center');
+  // swing plane disc
+  const circ = [];
+  for (let a = -Math.PI; a <= Math.PI + 1e-6; a += Math.PI / 60) circ.push(P(m.pt(a)));
+  if (circ.every(Boolean)) {
+    ctx.save(); ctx.fillStyle = 'rgba(180,140,255,0.10)'; ctx.beginPath();
+    circ.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.fill(); ctx.restore();
+  }
+  line(ctx, circ, 'rgba(180,140,255,0.45)', 1);
+  // swing direction (plane line on the ground through the low point)
+  const g0 = V(m.LP.x, 0, m.LP.z);
+  line(ctx, [P(add(g0, mul(m.d, -3))), P(add(g0, mul(m.d, 5)))], COL.plane, 1.5, [6, 5]);
+  // golfer feet & pivot
+  const fz = m.C.z - 0.12;
+  for (const fx of [-0.24, 0.2]) line(ctx, [P(V(fx - 0.06, 0, fz)), P(V(fx + 0.06, 0, fz - 0.03))], COL.muted, 5);
+  line(ctx, [P(V(m.C.x, 0, fz)), P(m.C)], 'rgba(139,155,148,0.35)', 1, [3, 4]);
+  dot2(ctx, P(m.C), 4, COL.plane);
+  const pc = P(m.C); if (pc) label(ctx, 'Pivot', pc[0] + 8, pc[1], COL.muted);
+  // downswing arc (highlight) and follow-through
+  const dsStart = -150 * D2R;
+  const arcPts = (a0, a1) => { const out = []; const n = 80; for (let i = 0; i <= n; i++) out.push(P(m.pt(a0 + (a1 - a0) * i / n))); return out; };
+  line(ctx, arcPts(dsStart, m.phiB), COL.accent, 3);
+  line(ctx, arcPts(m.phiB, 160 * D2R), 'rgba(95,211,154,0.45)', 2);
+  // low point marker
+  const lp = P(m.LP), lpg = P(V(m.LP.x, 0, m.LP.z));
+  line(ctx, [lpg, lp], COL.low, 1.5);
+  dot2(ctx, lp, 4.5, COL.low);
+  if (lp) label(ctx, 'Low point', lp[0] + 10, lp[1] + 14, COL.low);
+  // ball
+  const bc = P(m.ballC);
+  if (bc) { ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.arc(bc[0], bc[1], Math.max(3, BALL_R * P.f / bc[2]), 0, 7); ctx.fill(); ctx.restore(); }
+  // impact vectors + D-plane
+  if (document.getElementById('showVec').checked) {
+    const a = m.I, pa = add(a, mul(m.P, 0.7)), fa = add(a, mul(m.F, 0.5)), la = add(a, mul(m.L, 0.85));
+    const tri = [P(a), P(pa), P(fa)];
+    if (tri.every(Boolean)) { ctx.save(); ctx.fillStyle = 'rgba(255,212,92,0.10)'; ctx.beginPath(); ctx.moveTo(...tri[0]); ctx.lineTo(...tri[1]); ctx.lineTo(...tri[2]); ctx.fill(); ctx.restore(); }
+    arrow(ctx, P(a), P(pa), COL.path, 2.5);
+    arrow(ctx, P(a), P(fa), COL.face, 2.5);
+    arrow(ctx, P(a), P(la), COL.start, 1.5, 6);
+    const pp = P(pa); if (pp) label(ctx, 'Path', pp[0] + 6, pp[1], COL.path);
+    const fp = P(fa); if (fp) label(ctx, 'Face', fp[0] + 6, fp[1] - 4, COL.face);
+  }
+  // club: shaft from head toward pivot, arm from grip to pivot
+  const head = m.pt(phiNow);
+  const toC = norm(sub(m.C, head));
+  const grip = add(head, mul(toC, m.c.len * IN));
+  line(ctx, [P(grip), P(m.C)], 'rgba(228,235,231,0.35)', 4);
+  line(ctx, [P(head), P(grip)], '#c9d1cd', 2);
+  const hp = P(head);
+  if (hp) { ctx.save(); ctx.fillStyle = '#2a3430'; ctx.strokeStyle = '#c9d1cd'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(hp[0], hp[1], Math.max(4, 0.03 * P.f / hp[2]), 0, 7); ctx.fill(); ctx.stroke(); ctx.restore(); }
+  label(ctx, `VSP ${m.th * R2D | 0}°  ·  swing dir ${fmtSigned(state.hsp)}°  ·  radius ${state.radius}"`, 12, 16, COL.muted, 'left', false);
+}
+
+// ---------- face-on impact view ----------
+function drawImpact(m) {
+  const { ctx, w, h } = prep(document.getElementById('cImpact'));
+  const ex = state.exag, spanIn = 30, s = w / spanIn;
+  const ox = w * 0.45, gy = h * 0.62;
+  const S = (uIn, yIn) => [ox + uIn * s, gy - yIn * s * ex];
+  const toUV = p => [dot(sub(p, V(0, 0, 0)), m.d) / IN, p.y / IN];
+  // ground
+  ctx.fillStyle = '#1c2a1f'; ctx.fillRect(0, gy, w, h - gy);
+  line(ctx, [[0, gy], [w, gy]], '#3c5a44', 1.5);
+  // arc samples
+  const dphi = (spanIn * 0.6 * IN) / m.R;
+  const arc = [];
+  for (let i = 0; i <= 200; i++) arc.push(toUV(m.pt(m.phiB - dphi * 0.9 + 2 * dphi * i / 200)));
+  // divot (portion of arc below ground)
+  const below = arc.filter(p => p[1] < 0);
+  if (below.length > 1) {
+    ctx.save(); ctx.fillStyle = COL.dirt; ctx.beginPath();
+    ctx.moveTo(...S(below[0][0], 0)); below.forEach(p => ctx.lineTo(...S(p[0], p[1]))); ctx.lineTo(...S(below[below.length - 1][0], 0));
+    ctx.closePath(); ctx.fill(); ctx.restore();
+    label(ctx, 'divot', S((below[0][0] + below[below.length - 1][0]) / 2, 0)[0], gy + 22, '#c9a27a', 'center', false);
+  }
+  // tee
+  if (m.c.ballBottom > 0.005) { const tb = S(BALL_R / IN, 0), tt = S(BALL_R / IN, m.c.ballBottom / IN); line(ctx, [tb, tt], '#d9c7a0', 3); }
+  // ball
+  const bc = S(m.ballC.x / IN, m.ballC.y / IN);
+  ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.ellipse(bc[0], bc[1], BALL_R / IN * s, BALL_R / IN * s * ex, 0, 0, 7); ctx.fill(); ctx.restore();
+  // arc
+  line(ctx, arc.map(p => S(p[0], p[1])), COL.accent, 2.5);
+  // AoA tangent at impact
+  const iu = toUV(m.I);
+  const tanSlope = Math.tan(m.aoa * D2R);
+  const ta = S(iu[0] - 10, iu[1] - 10 * tanSlope), tb = S(iu[0] + 10, iu[1] + 10 * tanSlope);
+  line(ctx, [ta, tb], COL.path, 1.5, [5, 4]);
+  arrow(ctx, S(iu[0] - 4, iu[1] - 4 * tanSlope), S(iu[0] + 3, iu[1] + 3 * tanSlope), COL.path, 2.5);
+  // clubhead at impact
+  const ih = S(iu[0], iu[1]);
+  ctx.save(); ctx.translate(ih[0] - 6, ih[1]); ctx.fillStyle = '#c9d1cd';
+  ctx.beginPath(); ctx.ellipse(0, -4, 7, 4, 0, 0, 7); ctx.fill(); ctx.restore();
+  // low point
+  const lpu = toUV(m.LP), lps = S(lpu[0], lpu[1]);
+  line(ctx, [S(lpu[0], 0), lps], COL.low, 1, [3, 3]);
+  dot2(ctx, lps, 5, COL.low);
+  // dimension: ball -> low point
+  const dimY = gy + 42;
+  line(ctx, [[ih[0], dimY], [lps[0], dimY]], COL.low, 1.2);
+  line(ctx, [[ih[0], dimY - 5], [ih[0], dimY + 5]], COL.low, 1.2);
+  line(ctx, [[lps[0], dimY - 5], [lps[0], dimY + 5]], COL.low, 1.2);
+  const dirTxt = state.lp >= 0 ? 'ahead of ball' : 'behind ball';
+  label(ctx, `Low point ${Math.abs(state.lp).toFixed(1)}" ${dirTxt}`, (ih[0] + lps[0]) / 2, dimY + 16, COL.low, 'center');
+  label(ctx, `depth ${fmtSigned(m.lowDepth / IN, 2)}" vs ground`, (ih[0] + lps[0]) / 2, dimY + 36, COL.muted, 'center', false);
+  label(ctx, `AoA ${fmtSigned(m.aoa)}°`, tb[0] - 4, tb[1] - 16, COL.path, 'right');
+  label(ctx, '← back', 10, h - 12, COL.muted, 'left', false);
+  label(ctx, 'target →', w - 10, h - 12, COL.muted, 'right', false);
+  label(ctx, `vertical ×${ex}`, 10, 16, COL.muted, 'left', false);
+  // inset: spin loft (true angles)
+  const bx = w - 132, by = 10, bw = 122, bh = 92;
+  ctx.save(); ctx.fillStyle = 'rgba(14,19,17,0.85)'; ctx.strokeStyle = COL.line; ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh); ctx.restore();
+  const o = [bx + 16, by + bh - 22], L = 78;
+  line(ctx, [o, [o[0] + L + 10, o[1]]], 'rgba(255,255,255,0.25)', 1);
+  const pa = m.aoa * D2R, fa = Math.atan2(m.F.y, Math.hypot(m.F.x, m.F.z));
+  arrow(ctx, o, [o[0] + L * Math.cos(pa), o[1] - L * Math.sin(pa)], COL.path, 2, 6);
+  arrow(ctx, o, [o[0] + L * 0.8 * Math.cos(fa), o[1] - L * 0.8 * Math.sin(fa)], COL.face, 2, 6);
+  ctx.save(); ctx.strokeStyle = COL.start; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(o[0], o[1], 30, -fa, -pa, fa < pa); ctx.stroke(); ctx.restore();
+  label(ctx, `Spin loft ${m.spinLoft.toFixed(1)}°`, bx + 6, by + 12, COL.start, 'left', false);
+  label(ctx, `Dyn. loft ${state.dl.toFixed(1)}°`, bx + 6, by + bh - 8, COL.face, 'left', false);
+}
+
+// ---------- overhead impact view ----------
+function drawTop(m) {
+  const { ctx, w, h } = prep(document.getElementById('cTop'));
+  const ex = state.exag, spanIn = 30, s = w / spanIn;
+  const ox = w * 0.42, oy = h * 0.5;
+  const S = (xIn, zIn) => [ox + xIn * s, oy + zIn * s * ex];
+  const toXZ = p => [p.x / IN, p.z / IN];
+  label(ctx, 'golfer side', w / 2, 14, COL.muted, 'center', false);
+  label(ctx, `lateral ×${ex}`, 10, 14, COL.muted, 'left', false);
+  // target line
+  line(ctx, [S(-20, 0), S(20, 0)], COL.text, 1.2);
+  label(ctx, 'target →', w - 10, oy - 12, COL.text, 'right', false);
+  // swing direction through low point
+  const lp = toXZ(m.LP), dd = [m.d.x, m.d.z];
+  line(ctx, [S(lp[0] - 30 * dd[0], lp[1] - 30 * dd[1]), S(lp[0] + 30 * dd[0], lp[1] + 30 * dd[1])], COL.plane, 1.5, [6, 5]);
+  // clubhead path near impact
+  const dphi = (spanIn * 0.55 * IN) / m.R;
+  const arc = []; for (let i = 0; i <= 120; i++) arc.push(S(...toXZ(m.pt(m.phiB - dphi * 0.9 + 2 * dphi * i / 120))));
+  line(ctx, arc, COL.accent, 2.5);
+  dot2(ctx, S(lp[0], lp[1]), 4.5, COL.low);
+  // ball
+  const b = S(m.ballC.x / IN, 0);
+  ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.ellipse(b[0], b[1], BALL_R / IN * s, BALL_R / IN * s * ex, 0, 0, 7); ctx.fill(); ctx.restore();
+  // start line
+  const hla = m.hla * D2R;
+  arrow(ctx, b, S(m.ballC.x / IN + 14 * Math.cos(hla), 14 * Math.sin(hla)), COL.start, 2, 7);
+  // club path arrow
+  const pr = m.path * D2R, iu = toXZ(m.I);
+  arrow(ctx, S(iu[0] - 8 * Math.cos(pr), iu[1] - 8 * Math.sin(pr)), S(iu[0] + 9 * Math.cos(pr), iu[1] + 9 * Math.sin(pr)), COL.path, 2.5);
+  // face: segment perpendicular to horizontal face normal
+  const fr = state.face * D2R;
+  const fc = [iu[0] - 0.3, iu[1]];
+  line(ctx, [S(fc[0] + 1.6 * Math.sin(fr), fc[1] - 1.6 * Math.cos(fr)), S(fc[0] - 1.6 * Math.sin(fr), fc[1] + 1.6 * Math.cos(fr))], COL.face, 5);
+  arrow(ctx, S(fc[0], fc[1]), S(fc[0] + 7 * Math.cos(fr), fc[1] + 7 * Math.sin(fr)), COL.face, 2, 6);
+  // labels
+  let y = h - 74;
+  label(ctx, `Swing direction ${fmtSigned(state.hsp)}°`, 10, y, COL.plane); y += 20;
+  label(ctx, `Club path ${fmtSigned(m.path)}°  ·  Face ${fmtSigned(state.face)}°`, 10, y, COL.path); y += 20;
+  label(ctx, `Face-to-path ${fmtSigned(m.f2p)}°  ·  Start ${fmtSigned(m.hla)}°`, 10, y, COL.start);
+}
+
+// ---------- ball flight view ----------
+function drawFlight(m, frac) {
+  const { ctx, w, h } = prep(document.getElementById('cFlight'));
+  const f = m.flight;
+  const ptsAll = f.pts.map(p => ({ x: p.x / YD, y: p.y / YD, z: p.z / YD, t: p.t }));
+  const pts = ptsAll.filter(p => p.t <= f.time * frac + 1e-9);
+  const maxX = Math.max(60, Math.ceil(Math.max(...ptsAll.map(p => p.x)) / 50) * 50 + 25);
+  const pad = 34, plotW = w - pad - 12;
+  const sx = plotW / maxX;
+  // side view
+  const sideH = h * 0.44, sideBase = 18 + sideH;
+  const maxY = Math.max(15, Math.max(...ptsAll.map(p => p.y)) * 1.3);
+  const sy = (sideH - 10) / maxY;
+  const SX = x => pad + x * sx;
+  for (let x = 0; x <= maxX; x += 50) {
+    line(ctx, [[SX(x), 18], [SX(x), h - 8]], 'rgba(255,255,255,0.05)', 1);
+    label(ctx, x, SX(x), sideBase + 10, COL.muted, 'center', false);
+  }
+  line(ctx, [[pad, sideBase], [w - 12, sideBase]], '#3c5a44', 1.5);
+  label(ctx, 'Side', 10, 14, COL.muted, 'left', false);
+  line(ctx, pts.map(p => [SX(p.x), sideBase - p.y * sy]), COL.start, 2.5);
+  // top view
+  const topMid = sideBase + 28 + (h - sideBase - 36) / 2;
+  const sz = sx; // equal scale: true dispersion
+  line(ctx, [[pad, topMid], [w - 12, topMid]], COL.text, 1, [4, 4]);
+  label(ctx, 'Overhead (true scale)', 10, sideBase + 26, COL.muted, 'left', false);
+  line(ctx, pts.map(p => [SX(p.x), topMid + p.z * sz]), COL.start, 2.5);
+  // start-line reference
+  const hl = Math.tan(m.hla * D2R);
+  line(ctx, [[SX(0), topMid], [SX(maxX), topMid + maxX * hl * sz]], 'rgba(255,212,92,0.3)', 1, [3, 4]);
+  if (frac >= 1) {
+    const last = ptsAll[ptsAll.length - 1];
+    const apexPt = ptsAll.reduce((a, p) => p.y > a.y ? p : a, ptsAll[0]);
+    dot2(ctx, [SX(last.x), sideBase], 4, COL.start);
+    dot2(ctx, [SX(last.x), topMid + last.z * sz], 4.5, COL.start);
+    label(ctx, `Carry ${(f.carry / YD).toFixed(0)} yd`, SX(last.x) - 6, sideBase - 16, COL.start, 'right');
+    label(ctx, `Apex ${(f.apex / FT).toFixed(0)} ft`, SX(apexPt.x), sideBase - apexPt.y * sy - 14, COL.text, 'center');
+    label(ctx, `${fmtSigned(f.side / YD, 0)} yd`, SX(last.x) + 8, topMid + last.z * sz, COL.start);
+  }
+}
+
+// ---------- metrics ----------
+function tile(k, v, u) { return `<div class="m"><div class="k">${k}</div><div class="v">${v}<i>${u}</i></div></div>`; }
+function shotShape(m) {
+  const f = m.flight, carry = f.downrange;
+  const curve = (f.side - Math.tan(m.hla * D2R) * carry) / YD;
+  const startRel = m.hla;
+  const start = Math.abs(startRel) < 1.5 ? '' : startRel > 0 ? 'Push' : 'Pull';
+  let c = '';
+  if (Math.abs(curve) < 3) c = 'straight';
+  else if (curve > 0) c = curve > 15 ? 'slice' : 'fade';
+  else c = curve < -15 ? 'hook' : 'draw';
+  const name = start ? `${start}${c === 'straight' ? '' : '-' + c}` : c[0].toUpperCase() + c.slice(1);
+  return `${name} · curve ${fmtSigned(curve, 0)} yd`;
+}
+function updateMetrics(m) {
+  document.getElementById('mClub').innerHTML =
+    tile('Attack angle', fmtSigned(m.aoa), '°') + tile('Club path', fmtSigned(m.path), '°') +
+    tile('Face to path', fmtSigned(m.f2p), '°') + tile('Spin loft', m.spinLoft.toFixed(1), '°') +
+    tile('Low point', fmtSigned(state.lp), 'in') + tile('Low pt depth', fmtSigned(m.lowDepth / IN, 2), 'in');
+  document.getElementById('mBall').innerHTML =
+    tile('Ball speed', m.ballMph.toFixed(1), 'mph') + tile('Smash', m.smash.toFixed(2), '') +
+    tile('Launch angle', m.vla.toFixed(1), '°') + tile('Launch dir', fmtSigned(m.hla), '°') +
+    tile('Spin rate', Math.round(m.spin).toLocaleString(), 'rpm') + tile('Spin axis', fmtSigned(m.spinAxis), '°') +
+    tile('Carry', (m.flight.carry / YD).toFixed(0), 'yd') + tile('Apex', (m.flight.apex / FT).toFixed(0), 'ft') +
+    tile('Side', fmtSigned(m.flight.side / YD, 0), 'yd') + tile('Land angle', m.flight.landAngle.toFixed(0), '°');
+  document.getElementById('shape').textContent = shotShape(m);
+  document.getElementById('formula').innerHTML =
+    `<b style="color:var(--text)">How the numbers connect</b><br>
+     Club path ≈ swing dir − AoA ÷ tan(plane)<br>
+     <code>${fmtSigned(state.hsp)} − (${fmtSigned(m.aoa)}) ÷ tan ${state.vsp}° ≈ ${fmtSigned(m.approxPath)}°</code><br>
+     AoA = asin(sin φ · sin plane), where sin φ = −low point ÷ radius<br>
+     Spin loft = 3D angle between path and face normal; the spin axis is perpendicular to that D-plane.<br>
+     Ball-flight numbers are a simplified physics model for center strikes.`;
+}
+
+// ---------- render & animation ----------
+let model = null, anim = null;
+function render() {
+  model = computeModel(state);
+  updateMetrics(model);
+  frame(performance.now());
+}
+const SWING_T = 1.1, PHI0 = -150 * D2R, PHI1 = 165 * D2R;
+function frame(now) {
+  const m = model;
+  let phi = m.phiB, frac = 1;
+  if (anim) {
+    const t = (now - anim.t0) / 1000;
+    const u = Math.min(1, t / SWING_T);
+    const ease = (1 - Math.cos(Math.PI * u)) / 2;     // fastest at the bottom of the arc
+    phi = PHI0 + (PHI1 - PHI0) * ease;
+    // time at which the arc passes the ball
+    const eImp = (m.phiB - PHI0) / (PHI1 - PHI0);
+    const tImp = Math.acos(1 - 2 * eImp) / Math.PI * SWING_T;
+    const flightDur = m.flight.time / 2;               // 2× speed
+    frac = t < tImp ? 0 : Math.min(1, (t - tImp) / flightDur);
+    if (u >= 1 && frac >= 1) { anim = null; phi = m.phiB; }
+  }
+  draw3D(m, phi);
+  drawImpact(m);
+  drawTop(m);
+  drawFlight(m, frac);
+  if (anim) requestAnimationFrame(frame);
+}
+document.getElementById('play').onclick = () => { const was = anim; anim = { t0: performance.now() }; if (!was) requestAnimationFrame(frame); };
+document.getElementById('showVec').onchange = render;
+window.addEventListener('resize', render);
+
+Object.assign(state, { radius: CLUBS['7i'].len + 12 });
+syncControls();
+render();
+</script>
+</body>
+</html>
