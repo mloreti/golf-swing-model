@@ -1644,7 +1644,7 @@ const WIDGETS = {
     h: 320,
     controls: [
       { key: 'club', label: 'Club', options: { driver: 'Driver', '7i': '7 iron' }, init: 'driver' },
-      { key: 'hold', label: 'Direction slider sets', options: { path: 'Club path (fixed)', dir: 'Swing direction (fixed)' }, init: 'path' },
+      { key: 'hold', label: 'Direction slider sets', options: { dir: 'Swing direction (AoA moves the path)', path: 'Club path (AoA moves the swing direction)' }, init: 'dir' },
       { key: 'path', label: 'Path / swing direction', min: -8, max: 8, step: 0.1, init: -4, unit: '°', signed: true },
       { key: 'face', label: 'Face angle', min: -8, max: 8, step: 0.1, init: 0, unit: '°', signed: true },
       { key: 'aoa', label: 'Attack angle', min: -6, max: 6, step: 0.1, init: -0.9, unit: '°', signed: true },
@@ -2040,10 +2040,10 @@ const TOPICS = [
     <h2>Where attack angle fits in</h2>
     <p>Attack angle affects the D-plane in two ways:</p>
     <ul>
-      <li><b>It moves the path.</b> Set "Direction slider sets" to <i>swing direction</i>. With the swing direction held fixed, hitting down moves the club path right and hitting up moves it left, so face-to-path and curve change even though the face and swing are unchanged. With a square face and the swing aimed at the target, a driver hit 3° up has its path about 3° left, so it fades. Hit 3° down and it draws.</li>
+      <li><b>It moves the path.</b> With "Direction slider sets" on <i>swing direction</i> (the default) the swing direction is held fixed: hitting down moves the club path right and hitting up moves it left, so face-to-path and curve change even though the face and swing are unchanged. With a square face and the swing aimed at the target, a driver hit 3° up has its path about 3° left, so it fades. Hit 3° down and it draws.</li>
       <li><b>It changes spin loft.</b> Hitting up with a driver lowers spin loft, so there's less backspin to resist side spin. The same face-to-path then tilts the spin axis further and curves the ball a little more, but it also carries farther.</li>
     </ul>
-    <div class="callout"><b>Try it:</b> hold swing direction at 0°, face 0°, and drag attack angle from −4° to +4°. The ball goes from a hook (path right of the face) to a slice (path left of the face), about 30 yd of curve each way, without touching the face or the swing direction. Next, with the driver at path −4° and face 0°, the face is 4° open to the path. The ball starts almost straight and slices well right. Now drag the face to −4° to match the path: the curve disappears, but it's a straight pull. The real fix is the path. Set path 0° and face 0°.</div>` },
+    <div class="callout"><b>Try it:</b> with the slider on swing direction, set it to 0°, face 0°, and drag attack angle from −4° to +4°. The ball goes from a hook (path right of the face) to a slice (path left of the face), about 30 yd of curve each way, without touching the face or the swing direction. Next, switch "Direction slider sets" to <i>club path</i> and set path −4° and face 0°: the face is 4° open to the path. The ball starts almost straight and slices well right. Now drag the face to −4° to match the path: the curve disappears, but it's a straight pull. The real fix is the path. Set path 0° and face 0°.</div>` },
   { id: 'loft', title: 'Dynamic loft & spin loft', sub: 'What really creates launch and spin', html: `
     <h1>Dynamic loft & spin loft</h1>
     <p class="lede"><b>Dynamic loft</b> is how much loft the face actually has at impact. <b>Spin loft</b> is the angle between the face and the path. Launch comes mostly from dynamic loft; spin comes mostly from spin loft.</p>
