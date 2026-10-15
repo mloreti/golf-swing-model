@@ -1839,7 +1839,7 @@ const WIDGETS = {
       const tag = (txt, q, col, dy) => { const fits = q[0] + 8 + txt.length * 7 < lw; label(ctx, txt, fits ? q[0] + 8 : q[0] - 8, q[1] + dy, col, fits ? 'left' : 'right'); };
       const fm = S([cp[0] + Lv * 0.55 * n[0], cp[1] + Lv * 0.55 * n[1]]);
       label(ctx, `face ${dl.toFixed(1)}°`, fm[0] - 10, fm[1] - 12, COL.face, 'right');
-      tag(`path ${fmtSigned(v.aoa)}°`, S([bc[0] + Lv * 0.6 * Math.cos(aR), bc[1] + Lv * 0.6 * Math.sin(aR)]), COL.path, 14);
+      tag(`attack angle ${fmtSigned(v.aoa)}°`, S([bc[0] + Lv * 0.6 * Math.cos(aR), bc[1] + Lv * 0.6 * Math.sin(aR)]), COL.path, 14);
       tag(`launch ${m.vla.toFixed(1)}°`, S([bc[0] + Lv * 1.1 * Math.cos(la), bc[1] + Lv * 1.1 * Math.sin(la)]), COL.start, 6);
       label(ctx, `shaft lean ${fmtSigned(v.lean)}°`, 12, 16, COL.text, 'left');
       label(ctx, `dashed = head at address (${c.loft}° loft)`, 12, 38, COL.muted, 'left');
