@@ -64,6 +64,10 @@ canvas{display:block;width:100%}
 header{align-items:center}
 .app[hidden],.view .bar label[hidden]{display:none}
 #c3s{height:560px;cursor:grab;touch-action:none}
+.s3wrap{position:relative}
+#s3fp[hidden]{display:none}
+#s3fp{position:absolute;right:10px;top:10px;width:250px;height:240px;border:1px solid var(--line);border-radius:8px;pointer-events:none}
+@media (max-width:860px){#s3fp{width:200px;height:220px}}
 #c3s:active{cursor:grabbing}
 .s3time{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .s3time input[type=range]#s3T{flex:1;min-width:200px}
@@ -224,8 +228,11 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
         <label><input type="checkbox" id="s3o_trace"> Clubhead path</label>
         <label><input type="checkbox" id="s3o_hands"> Hand path</label>
         <label><input type="checkbox" id="s3o_ghost"> Club at impact</label>
+        <label><input type="checkbox" id="s3o_shPlane"> Shoulder plane</label>
+        <label><input type="checkbox" id="s3o_fp"> Force plate</label>
+        <label><input type="checkbox" id="s3o_grf"> Ground forces (3D)</label>
       </div>
-      <canvas id="c3s"></canvas>
+      <div class="s3wrap"><canvas id="c3s"></canvas><canvas id="s3fp"></canvas></div>
       <div class="s3time">
         <button class="primary" id="s3Play">▶ Play</button>
         <input type="range" id="s3T" min="0" max="2" step="0.001" value="0">
@@ -2159,7 +2166,7 @@ let learnStarted = false;
 const S3T = { A: 0.25, top: 1.05, ds: 0.62, end: 2.15 };   // timeline: address hold, top, downswing duration, end (s)
 const S3_CLUBS = { '5i': { lie: 61 }, '7i': { lie: 62.5 }, pw: { lie: 64 } };
 const S3_DEF = { club: '7i', speed: 0, bp: 0, hipTop: 45, chestTop: 90, hipImp: 40, chestImp: 25, shift: 4, tilt: 22, ext: 0, dh: 0,
-  bsLen: 120, hinge: 90, rel: 5.5, plane: 0, dir: 0, face: 0 };
+  bsLen: 120, hinge: 90, rel: 5.5, plane: 0, dir: 0, face: 0, drop: 0 };
 const S3K = { Rh: 0.56, thH: 64, k: 18, A: -45, g: 1.5, depth: -0.006 };   // g: shaft rotation per degree of wrist hinge (forearm rotation folded in)
 const m3 = {
   rx: (a, v) => { const c = Math.cos(a), s = Math.sin(a); return V(v.x, v.y * c - v.z * s, v.y * s + v.z * c); },
@@ -2203,12 +2210,17 @@ function s3Body(t, P) {
   const Pc = V(-0.01 + bp + px, 0.9 + py, -0.74 + pz);
   const base = add(Pc, V(0, 0.08, 0));
   const tilt = v => m3.rx(bet, m3.rz(lam, v)), Rt = v => tilt(m3.ry(cr, v));
+  // lead shoulder drop: the upper chest bends toward the target about the chest centre in the downswing
+  const drop = s3Key(t, P, [0, 0, P.drop || 0, (P.drop || 0) * 0.5]) * D2R, hub = add(base, tilt(V(0, 0.4, 0))), fwd = tilt(V(0, 0, 1));
+  const D = p => add(hub, m3.rot(sub(p, hub), fwd, -drop));
+  const shL0 = add(base, Rt(V(0.18, 0.45, 0))), shL = D(shL0);
   return {
-    pr, cr, lam, bet, Pc, base, heel, bp,
+    pr, cr, lam, bet, Pc, base, heel, bp, drop, hub,
     hipL: add(Pc, m3.ry(pr, V(0.1, 0, 0))), hipT: add(Pc, m3.ry(pr, V(-0.1, 0, 0))),
-    hub: add(base, tilt(V(0, 0.4, 0))),
-    shL: add(base, Rt(V(0.18, 0.45, 0))), shT: add(base, Rt(V(-0.18, 0.45, 0))), neck: add(base, tilt(V(0, 0.53, 0.0))),
-    head: add(base, tilt(V(0, 0.66, 0.05))), nose: tilt(m3.ry(cr * 0.25, norm(V(0, -0.55, 0.85)))),
+    shL, shT: D(add(base, Rt(V(-0.18, 0.45, 0)))), neck: D(add(base, tilt(V(0, 0.53, 0.0)))),
+    dLead: sub(shL, shL0),                                   // the lead arm hangs from the lead shoulder, so the hands follow it
+    axis: m3.rot(tilt(V(0, 1, 0)), fwd, -drop),
+    head: D(add(base, tilt(V(0, 0.66, 0.05)))), nose: m3.rot(tilt(m3.ry(cr * 0.25, norm(V(0, -0.55, 0.85)))), fwd, -drop),
     ankL: V(0.18 + bp, 0.07, -0.68), ankT: V(-0.2 + bp, 0.07 + heel * 0.5, -0.68),
   };
 }
@@ -2230,7 +2242,7 @@ function s3Club(t, P, cal, body) {
   const bl = down ? sm01((t - S3T.top) / 0.15) : 0;                      // transition into the downswing plane
   // downswing plane changes tilt the hand circle about the impact point, so they change path/AoA more than strike
   const R = v => m3.ry(-(P.dir + cal.dir) * D2R * bl, m3.rx(P.plane * D2R * bl, v));
-  const dHub = add(sub(b.hub, b0.hub), V(0, cal.dy * bl, cal.dz * bl));
+  const dHub = add(add(sub(b.hub, b0.hub), b.dLead), V(0, cal.dy * bl, cal.dz * bl));
   const C = add(S.C0, dHub), Q = add(S.head0, dHub);
   const Hraw = add(C, mul(add(mul(S.a0, Math.cos(ph * D2R)), mul(S.xh, Math.sin(ph * D2R))), S3K.Rh));
   const H = add(Q, R(sub(Hraw, Q)));
@@ -2285,6 +2297,61 @@ function s3Calib(club) {
   return (s3Cal[club] = cal);
 }
 
+// ---- ground reaction forces (simplified model, in body weights) ----
+// Lead-foot share follows the pressure shift and leads the pelvis; the vertical total dips at transition and peaks just
+// before impact; horizontal shear makes the turning couple (closing in the backswing, opening in the downswing) plus the
+// trail-foot push and lead-foot braking that come with the shift.
+const gss = (t, c, w) => Math.exp(-(((t - c) / w) ** 2));
+function s3Force(t, P, b) {
+  b = b || s3Body(t, P);
+  const tI = s3tI(P), sh = clamp(P.shift / 4, 0, 2);
+  const wImp = clamp(0.5 + 0.07 * P.shift, 0.35, 0.95);
+  const wL = clamp(s3Key(t, P, [0.5, clamp(0.3 - 0.003 * (P.hipTop - 45), 0.15, 0.45), wImp, clamp(wImp + 0.1, 0.5, 0.97)], 0.12), 0.03, 0.97);
+  const Fv = 1 - 0.15 * gss(t, S3T.top - 0.02, 0.05) + 0.45 * gss(t, tI - 0.07, 0.06) * (0.6 + 0.4 * Math.min(sh, 1.2));
+  const kRot = (P.hipImp + P.hipTop) / 85;
+  const r = -0.05 * gss(t, (S3T.A + S3T.top) / 2, 0.25) + 0.14 * kRot * gss(t, tI - 0.08, 0.07);
+  const push = 0.1 * sh * gss(t, S3T.top + 0.08, 0.07), brake = 0.12 * sh * gss(t, tI - 0.03, 0.05);
+  const dirL = V(Math.sin(25 * D2R), 0, Math.cos(25 * D2R)), dirT = V(-Math.sin(10 * D2R), 0, Math.cos(10 * D2R));
+  const oL = s3Key(t, P, [0, 0.01, -0.03, -0.04]) + (P.ext || 0) * 0.008, oT = s3Key(t, P, [0, -0.015, 0.03, 0.09]);
+  const fL = V(b.ankL.x, 0, b.ankL.z), fT = V(b.ankT.x, 0, b.ankT.z);
+  const copL = add(fL, mul(dirL, 0.05 + oL)), copT = add(fT, mul(dirT, 0.05 + oT));
+  const FL = V(-brake, Fv * wL, -r), FT = V(push, Fv * (1 - wL), r);
+  return { wL, Fv, FL, FT, copL, copT, cop: add(mul(copL, wL), mul(copT, 1 - wL)), fL, fT, dirL, dirT };
+}
+// force-plate popup: top view of both feet (target to the right, ball up), pressure split, centre-of-pressure trace, lead % over time
+function s3DrawFP() {
+  const cv = document.getElementById('s3fp'); if (cv.hidden) return;
+  const { ctx, w, h } = prep(cv), t = s3Anim.t, r = s3Res, f = s3Force(t, r.P);
+  ctx.fillStyle = 'rgba(21,28,25,0.92)'; ctx.fillRect(0, 0, w, h);
+  ctx.font = '600 12px -apple-system,sans-serif'; ctx.fillStyle = COL.text; ctx.textAlign = 'left'; ctx.fillText('Force plate', 10, 17);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.muted; ctx.font = '11px -apple-system,sans-serif'; ctx.fillText(`vertical ${f.Fv.toFixed(2)}× body weight`, w - 10, 17);
+  // plates
+  const cx = w / 2 - (f.fL.x + f.fT.x) / 2 * 230, cy = 92, s = 230, X = p => [cx + p.x * s, cy - (p.z + 0.62) * s];
+  for (const [foot, dir, share, nm] of [[f.fT, f.dirT, 1 - f.wL, 'Trail'], [f.fL, f.dirL, f.wL, 'Lead']]) {
+    const c = X(add(foot, mul(dir, 0.05)));
+    ctx.save(); ctx.strokeStyle = 'rgba(228,235,231,0.18)'; ctx.fillStyle = 'rgba(255,255,255,0.03)';          // plate
+    ctx.beginPath(); ctx.rect(c[0] - 0.13 * s, c[1] - 0.2 * s, 0.26 * s, 0.4 * s); ctx.fill(); ctx.stroke(); ctx.restore();
+    ctx.save(); ctx.translate(...c); ctx.rotate(Math.atan2(dir.x, dir.z));
+    ctx.fillStyle = `rgba(95,211,154,${0.12 + 0.75 * share})`; ctx.strokeStyle = 'rgba(228,235,231,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0, 0, 0.05 * s, 0.135 * s, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = COL.text; ctx.font = '650 15px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(share * 100)}%`, c[0], cy + 52);
+    ctx.fillStyle = COL.muted; ctx.font = '11px -apple-system,sans-serif'; ctx.fillText(nm, c[0], cy + 65);
+  }
+  ctx.fillStyle = COL.muted; ctx.textAlign = 'right'; ctx.fillText('target →', w - 8, cy + 65);
+  // centre-of-pressure traces (comparison first, underneath)
+  const cop = (res, col, wd, upto) => line(ctx, res.force.filter(q => q.t <= upto).map(q => X(q.cop)), col, wd);
+  if (s3CmpRes) cop(s3CmpRes, 'rgba(180,140,255,0.7)', 1.5, S3T.end);
+  cop(r, 'rgba(255,212,92,0.25)', 1.2, S3T.end); cop(r, COL.start, 2, t);
+  const cp = X(f.cop); dot2(ctx, cp, 5.5, COL.panel); dot2(ctx, cp, 4, COL.start);
+  // lead share over time
+  const y0 = cy + 78, ch = h - y0 - 16, tx = q => 10 + q / S3T.end * (w - 20), ty = v => y0 + ch - v * ch;
+  line(ctx, [[10, ty(0.5)], [w - 10, ty(0.5)]], 'rgba(255,255,255,0.12)', 1, [3, 3]);
+  if (s3CmpRes) line(ctx, s3CmpRes.force.map(q => [tx(q.t), ty(q.wL)]), 'rgba(180,140,255,0.7)', 1.5);
+  line(ctx, r.force.map(q => [tx(q.t), ty(q.wL)]), COL.accent, 1.8);
+  for (const [tt, nm] of [[S3T.top, 'top'], [r.m.tImp, 'impact']]) { line(ctx, [[tx(tt), y0], [tx(tt), y0 + ch]], 'rgba(255,255,255,0.18)', 1); ctx.fillStyle = COL.muted; ctx.textAlign = 'center'; ctx.font = '10px -apple-system,sans-serif'; ctx.fillText(nm, tx(tt), y0 + ch + 11); }
+  line(ctx, [[tx(t), y0], [tx(t), y0 + ch]], COL.text, 1.5);
+  ctx.fillStyle = COL.muted; ctx.textAlign = 'left'; ctx.fillText('% on lead foot', 10, y0 - 3);
+}
 // ---- 3D swing tab: controls, state, rendering ----
 const S3_GROUPS = [
   ['Setup', [
@@ -2304,6 +2371,7 @@ const S3_GROUPS = [
     { key: 'chestImp', label: 'Chest open at impact', min: -10, max: 50, step: 1, unit: '°', dec: 0 },
     { key: 'tilt', label: 'Side tilt at impact', min: 8, max: 35, step: 0.5, unit: '°', dec: 1, hint: 'spine tilted away from the target' },
     { key: 'ext', label: 'Early extension', min: 0, max: 4, step: 0.1, unit: ' in', dec: 1, hint: 'hips move toward the ball and the spine stands up' },
+    { key: 'drop', label: 'Lead shoulder drop', min: 0, max: 20, step: 0.5, unit: '°', dec: 1, hint: 'lead shoulder dips toward the ground in the downswing instead of working up' },
     { key: 'dh', label: 'Height change through impact', min: -2, max: 2, step: 0.05, unit: ' in', signed: true, dec: 2, hint: '+ stands up, − dips' },
   ]],
   ['Arms & club', [
@@ -2318,7 +2386,7 @@ let s3P = s3Defaults('7i');
 const s3Cam = { yaw: 200 * D2R, pitch: 12 * D2R, dist: 4.8, target: V(-0.05, 0.95, -0.45) };
 const S3_CAMS = { dtl: [180, 6, 4.8], fo: [90, 6, 4.8], top: [180, 86, 5.2], tgt: [0, 6, 4.8], iso: [200, 12, 4.8] };
 const s3Anim = { t: 0, playing: false, last: 0, rate: 0.25 };
-const s3Opt = { trace: true, hands: false, ghost: true, cmpMode: 'overlay' };
+const s3Opt = { trace: true, hands: false, ghost: true, shPlane: false, fp: true, grf: false, cmpMode: 'overlay' };
 let s3Res = null, s3CmpRes = null, s3CmpSel = 'none', s3Snap = null, s3Raf = 0;
 // common faults, each a set of slider changes from the default (tour) swing
 const S3_PRESETS = {
@@ -2329,6 +2397,7 @@ const S3_PRESETS = {
   ee: { name: 'Early extension', p: { ext: 1.5, dh: 0.15, hipImp: 30 }, desc: 'Hips thrust toward the ball and the spine stands up. The hands get pushed out and up: thin, toward the heel.' },
   stuck: { name: 'Stuck / in-to-out', p: { dir: 5, plane: -4, chestImp: 5 }, desc: 'Too shallow and too far from the inside with the chest closed. Path well right of the face: push-hook.' },
   sway: { name: 'Lateral slide', p: { shift: 6, hipImp: 15, tilt: 16 }, desc: 'Hips slide toward the target without turning. Low point jumps forward, attack angle gets very steep: thin, low.' },
+  dip: { name: 'Lead shoulder dip', p: { drop: 12 }, desc: 'The lead shoulder drops toward the ball in the downswing. The lead arm and hands go down with it: deeper, steeper, heavy contact.' },
   over: { name: 'Overswing', p: { bsLen: 138, hinge: 105, chestTop: 112, hipTop: 62, rel: 3 }, desc: 'Longer backswing that is hard to hold: more speed, but the release comes early and the arc bottoms behind the ball.' },
 };
 const s3Params = key => ({ ...s3Defaults(s3P.club), ...(key === 'snap' ? { ...s3Snap, club: s3P.club, speed: s3P.speed } : S3_PRESETS[key].p) });
@@ -2381,8 +2450,9 @@ function s3Solve(P) {
   const fl = learnModel(P.club, { speed, aoa: m.aoa, path: m.path, face: m.face, dl: clamp(m.dl, 4, 65) });
   const trace = [];
   for (let t = 0; t <= S3T.end + 1e-9; t += 1 / 400) { const c = s3Club(Math.min(t, S3T.end), P, cal); trace.push({ t, head: c.head, H: c.H }); }
-  const tops = s3Body(S3T.top, P);
-  return { P, cal, m, speed, fl, trace, xTop: (tops.pr - tops.cr) * R2D };
+  const tops = s3Body(S3T.top, P), force = [];
+  for (let t = 0; t <= S3T.end + 1e-9; t += 1 / 200) { const q = s3Force(t, P); force.push({ t, cop: q.cop, wL: q.wL }); }
+  return { P, cal, m, speed, fl, trace, force, xTop: (tops.pr - tops.cr) * R2D };
 }
 function s3Update() {
   s3Res = s3Solve(s3P);
@@ -2404,7 +2474,7 @@ function s3Metrics(r) {
   const { m, speed, fl, xTop, P } = r, b = s3Body(m.tImp, P);
   return [['Club speed', speed, 'mph', 0], ['Attack angle', m.aoa, '°', 1, 1], ['Club path', m.path, '°', 1, 1], ['Face', m.face, '°', 1, 1],
     ['Face to path', m.face - m.path, '°', 1, 1], ['Dynamic loft', m.dl, '°', 1], ['Shaft lean', m.lean, '°', 1, 1], ['Low point', m.lp / 0.0254, 'in', 1, 1],
-    ['Hips open (impact)', b.pr * R2D, '°', 0, 1], ['Chest open (impact)', b.cr * R2D, '°', 0, 1], ['X-factor (top)', Math.abs(xTop), '°', 0], ['Carry', fl.flight.carry / YD, 'yd', 0]];
+    ['Hips open (impact)', b.pr * R2D, '°', 0, 1], ['Chest open (impact)', b.cr * R2D, '°', 0, 1], ['Shoulder tilt (impact)', Math.atan2(b.shL.y - b.shT.y, Math.hypot(b.shL.x - b.shT.x, b.shL.z - b.shT.z)) * R2D, '°', 0, 1], ['X-factor (top)', Math.abs(xTop), '°', 0], ['Pressure on lead (impact)', s3Force(m.tImp, P).wL * 100, '%', 0], ['Carry', fl.flight.carry / YD, 'yd', 0]];
 }
 const s3v = (x, d, sg) => sg ? fmtSigned(x, d) : x.toFixed(d);
 function s3Readout() {
@@ -2524,6 +2594,26 @@ function s3Draw() {
     else { ctx.lineWidth = px; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); }
   }
   ctx.restore();
+  // shoulder plane: the disc the shoulders turn in (perpendicular to the upper spine)
+  if (s3Opt.shPlane) for (const [fi, f] of figs.entries()) {
+    if (fi && !side) continue;
+    const b = s3Body(t, f.r.P), mid = add(mul(add(b.shL, b.shT), 0.5), f.off), e1 = norm(sub(b.shL, b.shT)), e2 = norm(cross(b.axis, e1));
+    const ring = []; for (let a = 0; a <= 2 * Math.PI + 1e-6; a += Math.PI / 36) ring.push(P3(add(mid, add(mul(e1, 0.55 * Math.cos(a)), mul(e2, 0.55 * Math.sin(a))))));
+    if (ring.every(Boolean)) { ctx.save(); ctx.fillStyle = 'rgba(255,212,92,0.10)'; ctx.beginPath(); ring.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.fill(); ctx.restore(); }
+    line(ctx, ring, 'rgba(255,212,92,0.55)', 1.2);
+    line(ctx, [P3(add(mid, mul(e1, -0.8))), P3(add(mid, mul(e1, 0.8)))], COL.start, 2);
+  }
+  // ground reaction force vectors from each foot's centre of pressure (0.6 m per body weight)
+  if (s3Opt.grf) for (const [fi, f] of figs.entries()) {
+    if (fi && !side) continue;
+    const q = s3Force(t, f.r.P), o = f.off;
+    for (const [c, F, col, nm] of [[q.copL, q.FL, COL.accent, 'lead'], [q.copT, q.FT, COL.start, 'trail']]) {
+      const a = P3(add(c, o)), e = P3(add(add(c, o), mul(F, 0.6)));
+      if (a && e) { arrow(ctx, a, e, col, 3, 9); if (!fi || side) label(ctx, `${nm} ${len(F).toFixed(2)}× BW`, e[0] + 6, e[1], col); }
+    }
+  }
+  document.getElementById('s3fp').hidden = !s3Opt.fp;
+  if (s3Opt.fp) s3DrawFP();
   // labels
   const ph = s3Phase(t, s3Res.m), b = s3Body(t, s3Res.P);
   label(ctx, `${ph} · ${(t * 1000).toFixed(0)} ms`, 12, 16, COL.text);
@@ -2561,7 +2651,7 @@ function s3Init() {
     s3Anim.t = k === 'A' ? 0 : k === 'top' ? S3T.top : k === 'imp' ? s3Res.m.tImp : S3T.end; s3Draw();
   });
   const rate = document.getElementById('s3Rate'); rate.addEventListener('input', () => s3Anim.rate = +rate.value);
-  for (const k of ['trace', 'hands', 'ghost']) { const cb = document.getElementById('s3o_' + k); cb.checked = s3Opt[k]; cb.onchange = () => { s3Opt[k] = cb.checked; s3Draw(); }; }
+  for (const k of ['trace', 'hands', 'ghost', 'shPlane', 'fp', 'grf']) { const cb = document.getElementById('s3o_' + k); cb.checked = s3Opt[k]; cb.onchange = () => { s3Opt[k] = cb.checked; s3Draw(); }; }
   document.getElementById('s3Load').onclick = () => {
     const { m, speed, P } = s3Res, base = PROFILES.tour.clubs[P.club];
     Object.assign(state, deliveryState(P.club, { speed: Math.round(speed), vsp: base.vsp, aoa: +m.aoa.toFixed(1), path: +m.path.toFixed(1), face: +m.face.toFixed(1), dl: +clamp(m.dl, 4, 65).toFixed(1) }), { profile: null, depthAuto: true });
