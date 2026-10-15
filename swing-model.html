@@ -1547,12 +1547,12 @@ const WIDGETS = {
       { key: 'vsp', label: 'Swing plane', min: 40, max: 70, step: 0.5, init: 60, unit: '°' },
       { key: 'R', label: 'Swing radius', min: 38, max: 62, step: 0.5, init: 49, unit: ' in' },
     ],
-    caption: 'Positive = low point ahead of the ball (target side). Vertical scale ×4 so the arc is visible; angles are reported true.',
+    caption: 'Positive = low point ahead of the ball (target side). The arc keeps the same bottom depth (0.15 in below the turf), so moving the low point slides it forward and back. Vertical scale ×4 so the arc is visible; angles are reported true.',
     draw(ctx, w, h, v) {
       const { R, lp, vsp } = v, th = vsp * D2R, EX = 4;
       const viewW = w * 0.56, s = viewW / 30, ox = viewW * 0.45, gy = h * 0.52;
       const hRel = u => (R - Math.sqrt(Math.max(0, R * R - (u - lp) ** 2))) * Math.sin(th);
-      const hB = hRel(0), H = u => hRel(u) - hB;     // height vs ground, ground = club height at the ball
+      const H = u => hRel(u) - 0.15;                 // fixed bottom depth: moving the low point slides the arc sideways
       const S = (u, y) => [ox + u * s, gy - y * s * EX];
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, viewW, h); ctx.clip();
       ctx.fillStyle = '#1c2a1f'; ctx.fillRect(0, gy, viewW, h - gy);
@@ -1562,12 +1562,13 @@ const WIDGETS = {
       if (below.length > 1) { ctx.save(); ctx.fillStyle = COL.dirt; ctx.beginPath(); ctx.moveTo(...S(below[0], 0)); below.forEach(u => ctx.lineTo(...S(u, H(u)))); ctx.lineTo(...S(below[below.length - 1], 0)); ctx.fill(); ctx.restore(); }
       line(ctx, us.map(u => S(u, H(u))), COL.accent, 2.5);
       const g = arcAt(lp, R, vsp), slope = Math.tan(g.aoa * D2R) / Math.cos(0);
-      line(ctx, [S(-9, -9 * slope), S(9, 9 * slope)], COL.path, 1.5, [5, 4]);
-      arrow(ctx, S(-4, -4 * slope), S(2.5, 2.5 * slope), COL.path, 2.5);
+      const h0 = H(0);                               // club height as it reaches the ball
+      line(ctx, [S(-9, h0 - 9 * slope), S(9, h0 + 9 * slope)], COL.path, 1.5, [5, 4]);
+      arrow(ctx, S(-4, h0 - 4 * slope), S(2.5, h0 + 2.5 * slope), COL.path, 2.5);
       ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.arc(ox + BALL_IN * s, gy - BALL_IN * s, BALL_IN * s, 0, 7); ctx.fill(); ctx.restore();
       const lps = S(lp, H(lp)); line(ctx, [S(lp, 0), lps], COL.low, 1, [3, 3]); dot2(ctx, lps, 5, COL.low);
       label(ctx, 'low point', lps[0], lps[1] + 16, COL.low, 'center');
-      label(ctx, `AoA ${fmtSigned(g.aoa)}°`, S(-9, -9 * slope)[0], S(-9, -9 * slope)[1] - 16, COL.path, 'left');
+      label(ctx, `AoA ${fmtSigned(g.aoa)}°`, S(-9, h0 - 9 * slope)[0], S(-9, h0 - 9 * slope)[1] - 16, COL.path, 'left');
       label(ctx, '← back', 8, h - 12, COL.muted, 'left', false); label(ctx, 'target →', viewW - 8, h - 12, COL.muted, 'right', false);
       label(ctx, 'vertical ×4', 8, 14, COL.muted, 'left', false);
       ctx.restore();
