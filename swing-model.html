@@ -85,6 +85,7 @@ header{align-items:center}
 .azempty span{font-size:12px;margin-top:4px}
 .azempty[hidden]{display:none}
 #azMarks{height:38px}
+#azChart{height:220px;cursor:pointer}
 .azrow{display:flex;gap:6px;margin:6px 0}.azrow button{flex:1;font-size:12px;padding:5px 6px}
 .azrow input[type=number]{width:90px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 8px}
 .azrow2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
@@ -313,6 +314,15 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
       <p class="hint">Scrub to each position and press Set. Swing B syncs to A at impact.</p>
       <div id="azCps"></div>
     </div>
+    <div class="card">
+      <h2>Auto tracking</h2>
+      <p class="hint">Finds your body in every frame with MediaPipe Pose, running in this browser. The model (about 6 MB) downloads once from a CDN; the video itself stays on this device. Works best with a full-body, face-on clip. The club is not tracked.</p>
+      <button class="primary" id="azTrack" style="width:100%">Track body</button>
+      <p class="hint" id="azPoseSt" style="margin:8px 0"></p>
+      <label class="azchk"><input type="checkbox" id="azSkel" checked> Show skeleton</label>
+      <div class="azrow"><button id="azAutoCp">Auto-detect checkpoints</button></div>
+      <div class="azrow"><button id="azFill">Fill track points from tracking</button></div>
+    </div>
     <div class="card" id="azPtsCard">
       <h2>Track points</h2>
       <p class="hint">At each checkpoint, pick a body point and click it on the video. The next point is selected automatically.</p>
@@ -332,6 +342,12 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
       </div>
       <canvas id="azMarks"></canvas>
       <p class="hint" id="azMsg" style="margin:0;padding:0 12px 8px"></p>
+    </div>
+    <div class="card">
+      <div class="sumbar"><h2 style="margin:0">Body motion</h2><select id="azSeries" style="width:auto"></select></div>
+      <canvas id="azChart"></canvas>
+      <p class="hint" style="margin:6px 0 0">Click the chart to jump to that moment. Movements are measured from address; set a scale for inches.</p>
+      <p class="hint" id="azBenchNote" style="margin:4px 0 0"></p>
     </div>
     <div class="card">
       <h2>Measurements</h2>
@@ -2802,8 +2818,8 @@ const AZ_TOOLS = [['select', 'Select'], ['line', 'Line'], ['angle', 'Angle (3 cl
 const AZ_CP = [['address', 'Address'], ['top', 'Top'], ['p6', 'P6'], ['impact', 'Impact'], ['finish', 'Finish']];
 const AZ_PTS = [['head', 'Head'], ['shL', 'Lead shoulder'], ['shT', 'Trail shoulder'], ['hipL', 'Lead hip'], ['hipT', 'Trail hip'], ['hands', 'Hands'], ['club', 'Clubhead']];
 const AZ_COLORS = ['#ffd45c', '#ff5c7a', '#4aa8ff', '#5fd39a', '#b48cff', '#ffffff'];
-const az = { tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, started: false, msg: '' };
-const azNewPane = i => ({ i, video: null, name: '', shapes: [], cps: {}, pts: {}, scale: null, dir: 1, wrap: null, cv: null });
+const az = { skel: true, tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, started: false, msg: '' };
+const azNewPane = i => ({ i, video: null, name: '', shapes: [], cps: {}, pts: {}, scale: null, dir: 1, wrap: null, cv: null, pose: null });
 
 // ---- geometry helpers ----
 function azRect(p) {
@@ -2871,6 +2887,7 @@ function azDrawPane(p) {
   const vis = s => (s.type !== 'scale' || az.tool === 'scale') && (s.t == null || Math.abs(s.t - t) <= azFrameT() + 1e-3);   // the scale line only shows while setting it
   p.shapes.forEach((s, i) => { if (vis(s)) azShape(ctx, p, s, az.sel && az.sel.p === p.i && az.sel.k === i); });
   if (az.draft && az.draft.p === p.i) azShape(ctx, p, az.draft.s, false);
+  if (az.skel && p.pose) azDrawSkeleton(ctx, p);
   // tracked points: this checkpoint's points, with a trail from where they were at address
   const cp = azCpAt(p), here = cp && p.pts[cp] || {}, base = p.pts.address || {};
   for (const [k, nm] of AZ_PTS) {
@@ -2893,7 +2910,7 @@ function azDraw() {
   const A = az.panes[0], tEl = document.getElementById('azT');
   const dur = azDur(A);
   if (dur) { tEl.max = dur; if (!az.scrub) tEl.value = A.video.currentTime; }   // leave the thumb alone while it's being dragged
-  azMarks(); azTable();
+  azMarks(); azTable(); azChart();
   document.getElementById('azMsg').textContent = az.msg;
 }
 // checkpoint markers under the scrub bar
@@ -2966,6 +2983,194 @@ function azReport(p) {
     ${pats.length ? `<div class="callout"><b>Patterns</b><ul style="margin:6px 0 0">${pats.join('')}</ul></div>` : `<p class="hint">${n ? `${n} check${n > 1 ? 's' : ''} outside the typical range, no combined pattern.` : 'Everything measured is inside the typical range.'}</p>`}
     <table class="tgt azrep"><thead><tr><th>Check</th><th>You</th><th>Typical</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>
     <p class="hint">Ranges are rough guides for good players with a mid iron, filmed face-on at hand height from straight in front. Camera angle shifts them, so the most reliable comparison is your own swings: load a good one as swing B.</p>`;
+}
+// ---- Phase 2: automatic body tracking with MediaPipe Pose (runs in the browser; library + model load from a CDN) ----
+const AZ_MP = {
+  lib: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
+  wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
+  model: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+};
+// right-handed golfer: the lead side is the body's left
+const AZ_LM = { nose: 0, earL: 7, earR: 8, shL: 11, shT: 12, elL: 13, elT: 14, wrL: 15, wrT: 16, hipL: 23, hipT: 24, knL: 25, knT: 26, anL: 27, anT: 28 };
+const AZ_BONES = [['shL', 'shT'], ['shL', 'elL'], ['elL', 'wrL'], ['shT', 'elT'], ['elT', 'wrT'], ['shL', 'hipL'], ['shT', 'hipT'], ['hipL', 'hipT'], ['hipL', 'knL'], ['knL', 'anL'], ['hipT', 'knT'], ['knT', 'anT']];
+let azPoseLM = null, azPoseBusy = false, azPoseCancel = false;
+async function azGetLandmarker() {
+  if (azPoseLM) return azPoseLM;
+  const { FilesetResolver, PoseLandmarker } = await import(AZ_MP.lib);
+  const files = await FilesetResolver.forVisionTasks(AZ_MP.wasm);
+  const opts = d => ({ baseOptions: { modelAssetPath: AZ_MP.model, delegate: d }, runningMode: 'VIDEO', numPoses: 1 });
+  try { azPoseLM = await PoseLandmarker.createFromOptions(files, opts('GPU')); }
+  catch { azPoseLM = await PoseLandmarker.createFromOptions(files, opts('CPU')); }
+  return azPoseLM;
+}
+const azSeek = (v, t) => new Promise(res => { const done = () => { v.removeEventListener('seeked', done); res(); }; v.addEventListener('seeked', done); v.currentTime = t; });
+async function azTrack() {
+  const p = az.panes[az.active], st = document.getElementById('azPoseSt');
+  if (!p.video || azPoseBusy) return;
+  azPoseBusy = true; azPoseCancel = false; azPause();
+  const btn = document.getElementById('azTrack'); btn.textContent = 'Cancel';
+  try {
+    st.textContent = 'Loading the pose model (first time only)…';
+    const lm = await azGetLandmarker();
+    const v = p.video, dur = azDur(p), step = Math.max(1 / az.fps, dur / 400), times = [], frames = [];
+    const vw = v.videoWidth, vh = v.videoHeight, keepT = v.currentTime;
+    let lastMs = -1;
+    for (let t = 0; t <= dur - 1e-3; t += step) {
+      if (azPoseCancel) break;
+      await azSeek(v, t);
+      let ms = Math.round(t * 1000); if (ms <= lastMs) ms = lastMs + 1; lastMs = ms;
+      const r = lm.detectForVideo(v, ms), L = r.landmarks && r.landmarks[0];
+      times.push(t); frames.push(L ? L.map(q => ({ x: q.x * vw, y: q.y * vh, v: q.visibility ?? 1 })) : null);
+      st.textContent = `Tracking… ${Math.round(t / dur * 100)}%`;
+      if (times.length % 6 === 0) { p.pose = azSmooth(times, frames); azDraw(); }
+    }
+    p.pose = azSmooth(times, frames);
+    const found = frames.filter(Boolean).length;
+    st.textContent = azPoseCancel ? `Stopped: ${found} frames tracked.` : `Tracked ${found} of ${frames.length} frames.${found < frames.length * 0.8 ? ' The body was not found in some frames; a clearer, full-body shot helps.' : ''}`;
+    await azSeek(v, keepT);
+  } catch (e) {
+    st.textContent = `Couldn't load the pose model (${e.message || e}). It needs an internet connection the first time.`;
+  }
+  azPoseBusy = false; btn.textContent = 'Track body'; azSyncSide(); azDraw();
+}
+// light smoothing (3-sample moving average) to take out landmark jitter
+function azSmooth(times, frames) {
+  const out = frames.map((f, i) => {
+    if (!f) return null;
+    return f.map((q, k) => { let x = 0, y = 0, n = 0; for (let j = i - 1; j <= i + 1; j++) { const g = frames[j]; if (g) { x += g[k].x; y += g[k].y; n++; } } return { x: x / n, y: y / n, v: q.v }; });
+  });
+  return { times, frames: out };
+}
+// pose frame nearest to time t
+function azPoseAt(p, t) {
+  if (!p.pose) return null; const T = p.pose.times; let lo = 0, hi = T.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (T[m] <= t) lo = m; else hi = m; }
+  const i = Math.abs(T[hi] - t) < Math.abs(T[lo] - t) ? hi : lo;
+  return Math.abs(T[i] - t) <= Math.max(0.06, 2 / az.fps) ? p.pose.frames[i] : null;
+}
+// named body points from a pose frame
+function azBody(f) {
+  if (!f) return null; const g = k => f[AZ_LM[k]], mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const e1 = g('earL'), e2 = g('earR');
+  return { head: e1.v > 0.4 && e2.v > 0.4 ? mid(e1, e2) : g('nose'), shL: g('shL'), shT: g('shT'), hipL: g('hipL'), hipT: g('hipT'),
+    hands: mid(g('wrL'), g('wrT')), hipC: mid(g('hipL'), g('hipT')) };
+}
+function azDrawSkeleton(ctx, p) {
+  const f = azPoseAt(p, azT(p)); if (!f) return;
+  ctx.save(); ctx.lineCap = 'round';
+  for (const [a, b] of AZ_BONES) { const A = f[AZ_LM[a]], B = f[AZ_LM[b]]; if (A.v < 0.3 || B.v < 0.3) continue; line(ctx, [azToS(p, A), azToS(p, B)], 'rgba(180,140,255,0.85)', 3); }
+  for (const k of Object.keys(AZ_LM)) { const q = f[AZ_LM[k]]; if (q.v >= 0.3) dot2(ctx, azToS(p, q), 3.5, '#e4ebe7'); }
+  const b = azBody(f); dot2(ctx, azToS(p, b.head), 5, COL.start);
+  ctx.restore();
+}
+// series for the body-motion chart: value(body, base, pane) in display units
+const AZ_SERIES = {
+  shLy: { name: 'Lead shoulder height (up +)', u: 'len', f: (b, a, p) => (a.shL.y - b.shL.y) },
+  tilt: { name: 'Shoulder tilt (lead side up +)', u: '°', f: b => azTilt(b.shL, b.shT) },
+  headY: { name: 'Head height (up +)', u: 'len', f: (b, a) => a.head.y - b.head.y },
+  headX: { name: 'Head toward target', u: 'len', f: (b, a, p) => (b.head.x - a.head.x) * p.dir },
+  hipX: { name: 'Hip centre toward target', u: 'len', f: (b, a, p) => (b.hipC.x - a.hipC.x) * p.dir },
+  hipTilt: { name: 'Hip tilt (lead side up +)', u: '°', f: b => azTilt(b.hipL, b.hipT) },
+  handsY: { name: 'Hand height (up +)', u: 'len', f: (b, a) => a.hands.y - b.hands.y },
+};
+// Approximate tour benchmark (face-on, mid iron) at address, top, impact, finish. Lengths in inches from address, angles in degrees.
+// null = not meaningful from a face-on camera at that position (e.g. shoulder tilt with the shoulders turned away).
+const AZ_BENCH = {
+  shLy: [0, -4, 2.5, 4], tilt: [8, null, 36, null], headY: [0, -0.5, -1.5, 2], headX: [0, -1.5, -1, 6],
+  hipX: [0, 0, 3.5, 6], hipTilt: [2, -8, 10, 12], handsY: [0, 38, 2, 40],
+};
+// inches -> display units for pane p: the set scale, else a body-size estimate (head to ankles at address ≈ 55 in)
+function azBenchScale(p) {
+  if (p.scale) return { k: 1 / p.scale, est: false };
+  if (!p.pose) return null;
+  const T = p.pose.times, i = p.cps.address != null ? T.findIndex(t => t >= p.cps.address - 1e-3) : p.pose.frames.findIndex(Boolean), f = p.pose.frames[Math.max(0, i)];
+  if (!f) return null; const head = azBody(f).head, ank = (f[AZ_LM.anL].y + f[AZ_LM.anT].y) / 2;
+  return { k: Math.abs(ank - head.y) / 55, est: true };                         // px per inch
+}
+// benchmark curve stretched to the pane's checkpoint times (needs address, top and impact)
+function azBenchData(p, key) {
+  const v = AZ_BENCH[key], c = p.cps, S = AZ_SERIES[key];
+  if (!v || c.address == null || c.top == null || c.impact == null) return null;
+  const fin = c.finish ?? Math.min(azDur(p), c.impact + (c.impact - c.top) * 2);
+  const ts = [c.address, c.top, c.impact, fin];
+  let conv = x => x;
+  if (S.u === 'len') { const sc = azBenchScale(p); if (!sc) return null; conv = x => azMove(p, x * sc.k); }
+  const out = [];
+  for (let j = 0; j < 3; j++) {
+    if (v[j] == null || v[j + 1] == null) { out.push(null); continue; }
+    for (let k = 0; k <= 24; k++) { const u = k / 24, e = (1 - Math.cos(Math.PI * u)) / 2; out.push([ts[j] + (ts[j + 1] - ts[j]) * u, conv(v[j] + (v[j + 1] - v[j]) * e)]); }
+  }
+  // flat lead-in before address
+  out.unshift([0, conv(v[0] ?? 0)]); if (v[0] == null) out.shift();
+  out.keys = ts.map((t, j) => v[j] == null ? null : [t, conv(v[j])]).filter(Boolean);   // tour value at each checkpoint
+  return out;
+}
+function azSeriesData(p, key) {
+  if (!p.pose) return null;
+  const S = AZ_SERIES[key], fr = p.pose.frames, T = p.pose.times;
+  const bi = p.cps.address != null ? T.findIndex(t => t >= p.cps.address - 1e-3) : fr.findIndex(Boolean);
+  const base = azBody(fr[Math.max(0, bi)] || fr.find(Boolean)); if (!base) return null;
+  return T.map((t, i) => { const b = azBody(fr[i]); if (!b) return null; const v = S.f(b, base, p); return [t, S.u === 'len' ? azMove(p, v) : v]; });
+}
+function azChart() {
+  const cv = document.getElementById('azChart'); if (!cv || cv.offsetParent === null) return;
+  const { ctx, w, h } = prep(cv), key = document.getElementById('azSeries').value, S = AZ_SERIES[key], A = az.panes[0];
+  const sets = az.panes.filter((p, i) => p.pose && (!i || az.compare)).map(p => ({ p, d: azSeriesData(p, key), off: p.i ? azOffset() : 0 }));
+  if (!sets.length) { label(ctx, 'Track the body (Auto tracking card) to see how it moves through the swing.', w / 2, h / 2, COL.muted, 'center', false); return; }
+  const bench = azBenchData(A, key);
+  const dur = azDur(A) || 1, vals = [...sets.flatMap(s => s.d.filter(Boolean).map(q => q[1])), ...(bench || []).filter(Boolean).map(q => q[1]), ...(bench ? bench.keys.map(q => q[1]) : [])], lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), pad = (hi - lo) * 0.1 || 1;
+  const X = t => 46 + t / dur * (w - 60), Y = v => 14 + (hi + pad - v) / (hi - lo + 2 * pad) * (h - 40);
+  ctx.font = '11px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+  for (const v of [lo, (lo + hi) / 2, hi]) { line(ctx, [[46, Y(v)], [w - 14, Y(v)]], 'rgba(255,255,255,0.06)', 1); ctx.fillText(v.toFixed(1), 40, Y(v) + 4); }
+  line(ctx, [[46, Y(0)], [w - 14, Y(0)]], 'rgba(255,255,255,0.25)', 1);
+  for (const [k, nm] of AZ_CP) if (A.cps[k] != null) { const x = X(A.cps[k]); line(ctx, [[x, 10], [x, h - 24]], 'rgba(95,211,154,0.35)', 1, [3, 3]); ctx.textAlign = 'center'; ctx.fillStyle = COL.muted; ctx.fillText(nm, x, h - 10); }
+  if (bench) { line(ctx, bench.map(q => q ? [X(q[0]), Y(q[1])] : null), COL.start, 2, [6, 4]);
+    for (const [t, v] of bench.keys) { const x = X(t), y = Y(v); ctx.save(); ctx.fillStyle = COL.start; ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y); ctx.fill(); ctx.restore(); } }
+  for (const s of sets) {
+    const pts = s.d.map(q => q ? [X(q[0] + s.off), Y(q[1])] : null);
+    line(ctx, pts, s.p.i ? COL.plane : COL.accent, 2);
+  }
+  const tx = X(azT(A)); line(ctx, [[tx, 10], [tx, h - 24]], COL.text, 1.5);
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system,sans-serif';
+  ctx.fillText(`${S.name} · ${S.u === 'len' ? azUnit(A) : '°'}${S.u === 'len' ? ', from address' : ''}`, 50, 12);
+  // legend
+  const lg = [['You' + (sets.length > 1 ? ' (A)' : ''), COL.accent], ...(sets.length > 1 ? [['B', COL.plane]] : []), ...(bench ? [['Tour (approx.)', COL.start]] : [])];
+  ctx.font = '11px -apple-system,sans-serif'; let lx = w - 14; ctx.textAlign = 'right';
+  for (const [t, c] of lg.reverse()) { ctx.fillStyle = COL.text; ctx.fillText(t, lx, 12); lx -= ctx.measureText(t).width + 6; line(ctx, [[lx - 14, 8], [lx, 8]], c, 2, c === COL.start ? [4, 3] : null); lx -= 24; }
+  const note = document.getElementById('azBenchNote');
+  if (note) { const sc = S.u === 'len' && azBenchScale(A);
+    note.textContent = AZ_BENCH[key] && !bench ? 'Set address, top and impact checkpoints to see the tour benchmark.'
+      : bench ? `Tour line: approximate tour values at address, top, impact and finish, joined smoothly and stretched to your checkpoint times. A shape guide, not exact data.${sc && sc.est ? ' Distances are scaled from your body size; set a scale for better numbers.' : ''}${AZ_BENCH[key].includes(null) ? ' Shown only where a face-on camera can measure it.' : ''}` : ''; }
+  az.chartX = { X, dur };
+}
+// checkpoints from the hand path: address = before the hands start moving, top = hands highest on the way back,
+// impact = hands back down to address height (lowest point nearby), finish = hands highest after impact.
+function azAutoCps() {
+  const p = az.panes[az.active], st = document.getElementById('azPoseSt'); if (!p.pose) return;
+  const T = p.pose.times, B = p.pose.frames.map(azBody), ok = i => !!B[i], H = i => B[i].hands.y;
+  const idx = T.map((_, i) => i).filter(ok); if (idx.length < 10) { st.textContent = 'Not enough tracked frames to find checkpoints.'; return; }
+  const ht = Math.abs(B[idx[0]].head.y - B[idx[0]].hipC.y) || azRect(p).vh * 0.3, h0 = H(idx[0]);
+  const start = idx.find(i => Math.abs(H(i) - h0) > ht * 0.08) ?? idx[0], addr = idx[Math.max(0, idx.indexOf(start) - 2)];
+  let top = start; for (const i of idx) { if (i < start) continue; if (H(i) < H(top)) top = i; if (H(i) > H(top) + ht * 0.35) break; }
+  let imp = idx.find(i => i > top && H(i) >= h0 - ht * 0.05) ?? idx[idx.length - 1];
+  for (const i of idx) if (i > top && Math.abs(i - imp) <= 3 && H(i) > H(imp)) imp = i;
+  let fin = imp; for (const i of idx) if (i > imp && H(i) <= H(fin)) fin = i;
+  // sanity: a swing has the hands above the shoulders at the top, and top < impact < finish
+  const shY = (B[top].shL.y + B[top].shT.y) / 2;
+  if (!(addr < top && top < imp && imp <= fin) || H(top) > shY) { st.textContent = "Couldn't find a swing in the hand motion. Set the checkpoints by hand (scrub and press Set)."; return; }
+  let p6 = null; const hipY = B[addr].hipC.y; for (const i of idx) if (i > top && i < imp && H(i) >= hipY - ht * 0.1) { p6 = i; break; }
+  Object.assign(p.cps, { address: T[addr], top: T[top], impact: T[imp], finish: T[fin] }); if (p6 != null) p.cps.p6 = T[p6];
+  st.textContent = 'Checkpoints placed from the hand path. Check them and nudge any that are off (go to the frame and press Set).';
+  azSyncSide(); azSetTime(T[imp]); azDraw();
+}
+// copy tracked body points into the checkpoint track points (the clubhead stays manual)
+function azFillPts() {
+  const p = az.panes[az.active], st = document.getElementById('azPoseSt'); if (!p.pose) return;
+  let n = 0;
+  for (const [k] of AZ_CP) { if (p.cps[k] == null) continue; const b = azBody(azPoseAt(p, p.cps[k])); if (!b) continue;
+    const q = p.pts[k] = p.pts[k] || {}; for (const nm of ['head', 'shL', 'shT', 'hipL', 'hipT', 'hands']) q[nm] = { x: b[nm].x, y: b[nm].y }; n++; }
+  st.textContent = n ? `Filled head, shoulders, hips and hands at ${n} checkpoint${n > 1 ? 's' : ''}. Click the clubhead yourself at address and impact for shaft lean.` : 'Set checkpoints first (or use Auto-detect).';
+  azDraw();
 }
 function azTable() {
   const el = document.getElementById('azTable'), panes = az.panes.filter((p, i) => p.video && (!i || az.compare));
@@ -3071,7 +3276,7 @@ function azLoad(i, file) {
   const p = az.panes[i]; if (!file) return;
   if (p.video && p.video.src) URL.revokeObjectURL(p.video.src);
   const v = p.wrap.querySelector('video'); v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true; p.video = v; p.name = file.name;
-  p.shapes = []; p.cps = {}; p.pts = {}; p.scale = null;
+  p.shapes = []; p.cps = {}; p.pts = {}; p.scale = null; p.pose = null;
   v.onloadedmetadata = () => { v.currentTime = 0; azDraw(); };
   v.onseeked = () => azDraw();
   p.wrap.querySelector('.azempty').hidden = true;
@@ -3138,6 +3343,14 @@ function azInit() {
   window.addEventListener('pointerup', () => { if (az.scrub) { az.scrub = false; azDraw(); } });
   tEl.oninput = e => azSetTime(+e.target.value);
   document.getElementById('azSave').onclick = azSaveFrame;
+  document.getElementById('azSeries').innerHTML = Object.entries(AZ_SERIES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
+  document.getElementById('azSeries').onchange = azChart;
+  document.getElementById('azTrack').onclick = () => azPoseBusy ? (azPoseCancel = true) : azTrack();
+  document.getElementById('azSkel').onchange = e => { az.skel = e.target.checked; azDraw(); };
+  document.getElementById('azAutoCp').onclick = azAutoCps;
+  document.getElementById('azFill').onclick = azFillPts;
+  document.getElementById('azChart').addEventListener('click', e => { if (!az.chartX) return; const r = e.target.getBoundingClientRect(), x = e.clientX - r.left;
+    azPause(); azSetTime(clamp((x - 46) / (r.width - 60), 0, 1) * az.chartX.dur); });
   // click a checkpoint marker under the scrub bar to jump to it
   const mk = document.getElementById('azMarks'), near = e => { const x = e.clientX - mk.getBoundingClientRect().left; let b = null; for (const m of az.marks || []) if (Math.abs(m.x - x) < 14 && (!b || Math.abs(m.x - x) < Math.abs(b.x - x))) b = m; return b; };
   mk.addEventListener('click', e => { const m = near(e); if (m) { azPause(); azSetTime(m.t); } });
