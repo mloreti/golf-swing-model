@@ -85,6 +85,14 @@ header{align-items:center}
 .azempty span{font-size:12px;margin-top:4px}
 .azempty[hidden]{display:none}
 #azMarks{height:38px}
+#azT{flex:1;min-width:200px}
+.azsubs{display:flex;gap:2px;border-top:1px solid var(--line)}
+.azsubs[hidden]{display:none}
+.azsub{flex:1;min-width:0;display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:12px;color:var(--muted)}
+.azsub button{padding:3px 8px;font-size:12px}
+.azsub input[type=range]{flex:1;min-width:60px}
+.azsub b{color:var(--text);min-width:64px;font-variant-numeric:tabular-nums;font-weight:500}
+.azsub.on{background:rgba(95,211,154,0.07)}
 #azChart{height:220px;cursor:pointer}
 .azrow{display:flex;gap:6px;margin:6px 0}.azrow button{flex:1;font-size:12px;padding:5px 6px}
 .azrow input[type=number]{width:90px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 8px}
@@ -289,7 +297,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
       <p class="hint">Your video stays on this device: it is played locally and never uploaded.</p>
       <div class="azrow"><button class="primary" onclick="document.getElementById('azFileA').click()">Load swing A</button><button onclick="document.getElementById('azFileB').click()">Load swing B</button></div>
       <input type="file" id="azFileA" accept="video/*" hidden><input type="file" id="azFileB" accept="video/*" hidden>
-      <label class="azchk"><input type="checkbox" id="azCompare"> Side by side (synced at impact)</label>
+      <label class="azchk"><input type="checkbox" id="azCompare"> Side by side</label>
       <div class="azrow2">
         <div class="ctrl"><div class="row"><span>Frame rate</span></div><select id="azFps"><option value="30">30 fps</option><option value="60">60 fps</option><option value="120">120 fps</option><option value="240">240 fps</option></select></div>
         <div class="ctrl"><div class="row"><span>Target is</span></div><select id="azDir"><option value="1">to the right</option><option value="-1">to the left</option></select></div>
@@ -334,11 +342,12 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
     <div class="view">
       <div class="azstage"><div class="azpane" id="azPaneA"><video playsinline muted preload="auto"></video><canvas></canvas><div class="azempty">Load a swing video<br><span>click here or use “Load swing A”</span></div></div>
         <div class="azpane" id="azPaneB" hidden><video playsinline muted preload="auto"></video><canvas></canvas><div class="azempty">Load swing B<br><span>to compare side by side</span></div></div></div>
+      <div class="azsubs" id="azSubs" hidden><div class="azsub" data-pane="0"><span>A</span><button data-pplay="0" title="Play swing A only">▶</button><button data-pstep="-1" title="Previous frame">◀</button><button data-pstep="1" title="Next frame">▶</button><input type="range" min="0" max="1" step="0.001" value="0"><b>0.00 s</b></div><div class="azsub" data-pane="1"><span>B</span><button data-pplay="1" title="Play swing B only">▶</button><button data-pstep="-1" title="Previous frame">◀</button><button data-pstep="1" title="Next frame">▶</button><input type="range" min="0" max="1" step="0.001" value="0"><b>0.00 s</b></div></div>
       <div class="s3time">
         <button class="primary" id="azPlay">▶ Play</button><button id="azBack" title="Previous frame (←)">◀</button><button id="azFwd" title="Next frame (→)">▶</button>
         <input type="range" id="azT" min="0" max="1" step="0.001" value="0">
         <label>Speed <select id="azRate" style="width:auto"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25" selected>¼×</option><option value="0.1">0.1×</option></select></label>
-        <button id="azSave">Save frame</button>
+        <button id="azAlign" hidden title="Move both swings to their impact checkpoint">Line up at impact</button><button id="azSave">Save frame</button>
       </div>
       <canvas id="azMarks"></canvas>
       <p class="hint" id="azMsg" style="margin:0;padding:0 12px 8px"></p>
@@ -2818,7 +2827,7 @@ const AZ_TOOLS = [['select', 'Select'], ['line', 'Line'], ['angle', 'Angle (3 cl
 const AZ_CP = [['address', 'Address'], ['top', 'Top'], ['p6', 'P6'], ['impact', 'Impact'], ['finish', 'Finish']];
 const AZ_PTS = [['head', 'Head'], ['shL', 'Lead shoulder'], ['shT', 'Trail shoulder'], ['hipL', 'Lead hip'], ['hipT', 'Trail hip'], ['hands', 'Hands'], ['club', 'Clubhead']];
 const AZ_COLORS = ['#ffd45c', '#ff5c7a', '#4aa8ff', '#5fd39a', '#b48cff', '#ffffff'];
-const az = { skel: true, tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, started: false, msg: '' };
+const az = { skel: true, tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, off: 0, playing: null, scrubP: -1, started: false, msg: '' };
 const azNewPane = i => ({ i, video: null, name: '', shapes: [], cps: {}, pts: {}, scale: null, dir: 1, wrap: null, cv: null, pose: null });
 
 // ---- geometry helpers ----
@@ -2835,12 +2844,11 @@ const azFrameT = () => 0.5 / az.fps;
 function azLen(p, a, b) { const d = azDist(a, b); return p.scale ? `${(d * p.scale).toFixed(1)} in` : `${(d / azRect(p).vh * 100).toFixed(1)}%`; }
 const azUnit = p => p.scale ? 'in' : '% ht';
 const azMove = (p, d) => p.scale ? d * p.scale : d / azRect(p).vh * 100;
-// time in pane p that matches the master pane's time (synced at impact, else address)
-function azOffset() {
-  const [A, B] = az.panes; if (!B.video) return 0;
-  for (const k of ['impact', 'address']) if (A.cps[k] != null && B.cps[k] != null) return A.cps[k] - B.cps[k];
-  return 0;
-}
+// A's time minus B's time. Set by scrubbing either swing on its own; Play both and the main bar keep it.
+const azOffset = () => az.compare && az.panes[1].video ? az.off : 0;
+function azRelink() { const [A, B] = az.panes; if (A.video && B.video) az.off = A.video.currentTime - B.video.currentTime; }
+// move one swing on its own (changes the sync between them)
+function azSeekPane(p, t) { if (!p.video) return; p.video.currentTime = clamp(t, 0, azDur(p)); if (az.compare) azRelink(); }
 const azT = p => p.video ? p.video.currentTime : 0;
 // duration, falling back to the seekable range for files that don't report one
 const azDur = p => { const v = p.video; if (!v) return 0; if (isFinite(v.duration) && v.duration > 0) return v.duration; return v.seekable && v.seekable.length ? v.seekable.end(0) : 0; };
@@ -2910,6 +2918,10 @@ function azDraw() {
   const A = az.panes[0], tEl = document.getElementById('azT');
   const dur = azDur(A);
   if (dur) { tEl.max = dur; if (!az.scrub) tEl.value = A.video.currentTime; }   // leave the thumb alone while it's being dragged
+  document.querySelectorAll('#azSubs .azsub').forEach(el => { const p = az.panes[+el.dataset.pane], r = el.querySelector('input'), d = azDur(p);
+    el.classList.toggle('on', az.active === p.i);
+    if (d) { r.max = d; if (az.scrubP !== p.i) r.value = p.video.currentTime; }
+    el.querySelector('b').textContent = p.video ? `${p.video.currentTime.toFixed(2)} s` : '–'; });
   azMarks(); azTable(); azChart();
   document.getElementById('azMsg').textContent = az.msg;
 }
@@ -3161,7 +3173,7 @@ function azAutoCps() {
   let p6 = null; const hipY = B[addr].hipC.y; for (const i of idx) if (i > top && i < imp && H(i) >= hipY - ht * 0.1) { p6 = i; break; }
   Object.assign(p.cps, { address: T[addr], top: T[top], impact: T[imp], finish: T[fin] }); if (p6 != null) p.cps.p6 = T[p6];
   st.textContent = 'Checkpoints placed from the hand path. Check them and nudge any that are off (go to the frame and press Set).';
-  azSyncSide(); azSetTime(T[imp]); azDraw();
+  azSyncSide(); if (az.compare) azSeekPane(p, T[imp]); else azSetTime(T[imp]); azDraw();
 }
 // copy tracked body points into the checkpoint track points (the clubhead stays manual)
 function azFillPts() {
@@ -3258,20 +3270,52 @@ function azSetTime(t) {
   if (az.compare && B.video) B.video.currentTime = clamp(A.video.currentTime - azOffset(), 0, azDur(B));
 }
 function azStep(n) { azPause(); azSetTime(azT(az.panes[0]) + n / az.fps); }
-function azPlay() {
-  const [A, B] = az.panes; if (!A.video) return;
+function azStepPane(p, n) { azPause(); azSeekPane(p, azT(p) + n / az.fps); }
+const azAtEnd = p => !p.video || p.video.ended || p.video.currentTime >= azDur(p) - 1e-3;
+const azRunning = p => p.video && !p.video.paused && !p.video.ended;
+// which: 'both' (A drives, B follows at the current sync) or a pane index to play that swing alone
+function azPlay(which = 'both') {
+  const [A, B] = az.panes, two = az.compare && B.video;
+  if (which === 'both' ? !A.video : !az.panes[which].video) return;
+  azPause();
   const rate = +document.getElementById('azRate').value;
-  if (A.video.ended || A.video.currentTime >= azDur(A) - 1e-3) azSetTime(0);
-  for (const p of [A, B]) if (p.video && (p === A || az.compare)) { p.video.playbackRate = rate; p.video.play(); }
-  document.getElementById('azPlay').textContent = '❚❚ Pause';
+  az.playing = which;
+  if (which !== 'both') { const p = az.panes[which]; if (azAtEnd(p)) p.video.currentTime = 0; p.video.playbackRate = rate; p.video.play(); }
+  else {
+    if (azAtEnd(A) && (!two || azAtEnd(B))) { A.video.currentTime = two ? clamp(az.off, 0, azDur(A)) : 0; if (two) B.video.currentTime = clamp(A.video.currentTime - az.off, 0, azDur(B)); }
+    for (const p of two ? [A, B] : [A]) { p.video.playbackRate = rate; if (!azAtEnd(p) && (p === A || A.video.currentTime - az.off >= 0)) p.video.play(); }
+  }
+  azBtns();
   const loop = () => {
-    az.raf = 0; if (A.video.paused) return azPause();
-    if (az.compare && B.video) { const want = A.video.currentTime - azOffset(); if (Math.abs(B.video.currentTime - want) > 1.5 / az.fps) B.video.currentTime = clamp(want, 0, azDur(B)); }
+    az.raf = 0;
+    if (which === 'both' && two && azRunning(A)) {   // keep B in step; it waits at its first frame until A reaches it
+      const want = A.video.currentTime - az.off;
+      if (want < 0) { if (!B.video.paused) B.video.pause(); }
+      else if (want < azDur(B)) { if (B.video.paused) { B.video.playbackRate = rate; B.video.play(); } if (Math.abs(B.video.currentTime - want) > 1.5 / az.fps) B.video.currentTime = want; }
+    }
+    if (!az.panes.some(azRunning)) return azPause();
     azDraw(); az.raf = requestAnimationFrame(loop);
   };
   if (!az.raf) az.raf = requestAnimationFrame(loop);
 }
-function azPause() { for (const p of az.panes) if (p.video) p.video.pause(); if (az.raf) cancelAnimationFrame(az.raf); az.raf = 0; document.getElementById('azPlay').textContent = '▶ Play'; azDraw(); }
+function azPause() {
+  for (const p of az.panes) if (p.video) p.video.pause();
+  if (az.raf) cancelAnimationFrame(az.raf); az.raf = 0;
+  if (typeof az.playing === 'number' && az.compare) azRelink();   // playing one swing alone moves the sync
+  az.playing = null; azBtns(); azDraw();
+}
+function azBtns() {
+  document.getElementById('azPlay').textContent = az.playing === 'both' ? '❚❚ Pause' : az.compare ? '▶ Play both' : '▶ Play';
+  document.querySelectorAll('#azSubs [data-pplay]').forEach(b => b.textContent = az.playing === +b.dataset.pplay ? '❚❚' : '▶');
+}
+// sync both swings at a checkpoint they share
+function azAlign() {
+  const [A, B] = az.panes; if (!A.video || !B.video) return;
+  const k = ['impact', 'address', 'top'].find(k => A.cps[k] != null && B.cps[k] != null);
+  if (!k) { az.msg = 'Set the impact checkpoint on both swings first, or scrub each swing to the same moment with its own bar.'; return azDraw(); }
+  azPause(); az.off = A.cps[k] - B.cps[k]; azSetTime(A.cps[k]);
+  az.msg = `Swings lined up at ${AZ_CP.find(c => c[0] === k)[1].toLowerCase()}. Play both keeps them in step.`; azDraw();
+}
 function azLoad(i, file) {
   const p = az.panes[i]; if (!file) return;
   if (p.video && p.video.src) URL.revokeObjectURL(p.video.src);
@@ -3280,10 +3324,13 @@ function azLoad(i, file) {
   v.onloadedmetadata = () => { v.currentTime = 0; azDraw(); };
   v.onseeked = () => azDraw();
   p.wrap.querySelector('.azempty').hidden = true;
-  if (i) { az.compare = true; document.getElementById('azCompare').checked = true; azLayout(); }
+  if (i) { az.compare = true; document.getElementById('azCompare').checked = true; az.off = azT(az.panes[0]); azLayout(); }
   az.active = i; azSyncSide(); azDraw();
 }
-function azLayout() { document.getElementById('azPaneB').hidden = !az.compare; azDraw(); }
+function azLayout() {
+  document.getElementById('azPaneB').hidden = document.getElementById('azSubs').hidden = document.getElementById('azAlign').hidden = !az.compare;
+  azBtns(); azDraw();
+}
 // sidebar state for the active pane
 function azSyncSide() {
   const p = az.panes[az.active];
@@ -3326,22 +3373,29 @@ function azInit() {
   document.querySelectorAll('#azPts [data-pt]').forEach(b => b.onclick = () => { az.ptName = b.dataset.pt; az.tool = 'point'; azSyncSide(); });
   document.querySelectorAll('#azCps [data-cp]').forEach(b => b.onclick = () => { const p = az.panes[az.active]; if (!p.video) return; p.cps[b.dataset.cp] = azT(p); azSyncSide(); azDraw(); });
   document.querySelectorAll('#azCps [data-go]').forEach(b => b.onclick = () => { const p = az.panes[az.active], t = p.cps[b.dataset.go]; if (t == null) return; azPause();
-    if (p.i === 0) azSetTime(t); else { p.video.currentTime = t; if (az.panes[0].video) az.panes[0].video.currentTime = t + azOffset(); } });
+    if (az.compare) azSeekPane(p, t); else azSetTime(t); });
   document.getElementById('azScope').onchange = e => az.scope = e.target.value;
   document.getElementById('azFps').onchange = e => { az.fps = +e.target.value; azDraw(); };
   document.getElementById('azDir').onchange = e => { az.panes[az.active].dir = +e.target.value; azDraw(); };
-  document.getElementById('azCompare').onchange = e => { az.compare = e.target.checked; if (!az.compare) az.active = 0; azLayout(); azSyncSide(); };
+  document.getElementById('azCompare').onchange = e => { azPause(); az.compare = e.target.checked; if (!az.compare) az.active = 0; else azRelink(); azLayout(); azSyncSide(); };
   document.getElementById('azDel').onclick = () => { if (!az.sel) return; const p = az.panes[az.sel.p], s = p.shapes[az.sel.k]; if (s.type === 'scale') p.scale = null; p.shapes.splice(az.sel.k, 1); az.sel = null; azSyncSide(); azDraw(); };
   document.getElementById('azClear').onclick = () => { const p = az.panes[az.active]; p.shapes = p.shapes.filter(s => s.type === 'scale'); az.sel = null; azDraw(); };
   document.getElementById('azClearPts').onclick = () => { const p = az.panes[az.active], cp = azCpAt(p); if (cp) delete p.pts[cp]; else p.pts = {}; azDraw(); };
   document.querySelectorAll('[data-real]').forEach(b => b.onclick = () => { document.getElementById('azReal').value = b.dataset.real; const p = az.panes[az.active], s = p.shapes.find(x => x.type === 'scale'); if (s) { s.real = +b.dataset.real; azApplyScale(p, s); azDraw(); } });
   document.getElementById('azReal').oninput = e => { const p = az.panes[az.active], s = p.shapes.find(x => x.type === 'scale'); if (s && +e.target.value > 0) { s.real = +e.target.value; azApplyScale(p, s); azDraw(); } };
-  document.getElementById('azPlay').onclick = () => az.panes[0].video && (az.panes[0].video.paused ? azPlay() : azPause());
+  document.getElementById('azPlay').onclick = () => az.playing === 'both' ? azPause() : azPlay('both');
   document.getElementById('azBack').onclick = () => azStep(-1); document.getElementById('azFwd').onclick = () => azStep(1);
   const tEl = document.getElementById('azT');
   tEl.addEventListener('pointerdown', () => { az.scrub = true; if (az.panes[0].video && !az.panes[0].video.paused) azPause(); });
   window.addEventListener('pointerup', () => { if (az.scrub) { az.scrub = false; azDraw(); } });
   tEl.oninput = e => azSetTime(+e.target.value);
+  document.getElementById('azAlign').onclick = azAlign;
+  document.querySelectorAll('#azSubs .azsub').forEach(el => { const p = az.panes[+el.dataset.pane], r = el.querySelector('input');
+    el.querySelector('[data-pplay]').onclick = () => az.playing === p.i ? azPause() : azPlay(p.i);
+    el.querySelectorAll('[data-pstep]').forEach(b => b.onclick = () => azStepPane(p, +b.dataset.pstep));
+    r.addEventListener('pointerdown', () => { az.scrubP = p.i; azPause(); if (az.active !== p.i) { az.active = p.i; azSyncSide(); } });
+    r.oninput = () => azSeekPane(p, +r.value); });
+  window.addEventListener('pointerup', () => { if (az.scrubP >= 0) { az.scrubP = -1; azDraw(); } });
   document.getElementById('azSave').onclick = azSaveFrame;
   document.getElementById('azSeries').innerHTML = Object.entries(AZ_SERIES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
   document.getElementById('azSeries').onchange = azChart;
@@ -3357,7 +3411,8 @@ function azInit() {
   mk.addEventListener('mousemove', e => mk.style.cursor = near(e) ? 'pointer' : 'default');
   document.addEventListener('keydown', e => {
     if (document.getElementById('tabAz').hidden || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); azStep((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const n = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1);
+      if (az.compare) azStepPane(az.panes[az.active], n); else azStep(n); }   // side by side: arrows step the selected swing
     else if (e.key === ' ') { e.preventDefault(); document.getElementById('azPlay').click(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); document.getElementById('azDel').click(); }
     else if (e.key === 'Escape') { az.draft = null; azDraw(); }
