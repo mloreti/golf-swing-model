@@ -76,6 +76,36 @@ header{align-items:center}
 .m4s{grid-template-columns:repeat(6,1fr)}
 @media (max-width:1100px){.m4s{grid-template-columns:repeat(3,1fr)}}
 #s3Ctrls{display:flex;flex-direction:column;gap:14px}
+.azstage{display:flex;gap:2px;height:600px;background:#000}
+.azpane{position:relative;flex:1;min-width:0;background:#050807}
+.azpane[hidden]{display:none}
+.azpane video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.azpane canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.azempty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);font-size:15px;cursor:pointer;text-align:center}
+.azempty span{font-size:12px;margin-top:4px}
+.azempty[hidden]{display:none}
+#azMarks{height:38px}
+.azrow{display:flex;gap:6px;margin:6px 0}.azrow button{flex:1;font-size:12px;padding:5px 6px}
+.azrow input[type=number]{width:90px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 8px}
+.azrow2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.azchk{display:flex;gap:6px;align-items:center;font-size:13px;margin:6px 0}
+.aztools{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.aztools button,.azpts button{font-size:12px;padding:5px 6px}
+.aztools button.on,.azpts button.on{background:var(--accent);color:#0b1a12;border-color:var(--accent);font-weight:650}
+.azcolors{display:flex;gap:6px;margin:8px 0}.azcolors button{width:24px;height:24px;padding:0;border-radius:50%;border:2px solid transparent}
+.azcolors button.on{border-color:#fff}
+.azpts{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+#azPtsCard.dim .azpts{opacity:.7}
+.azcp{display:grid;grid-template-columns:1fr 34px;gap:4px;margin-bottom:4px}.azcp button{font-size:12px;padding:5px 6px}
+.azcp.set button:first-child{border-color:var(--accent);color:var(--accent)}
+h3.azh{font-size:13px;margin:16px 0 6px;color:var(--text)}
+.azrep td:nth-child(4){font-size:13px;color:var(--muted)}
+.azrep tr.ok td:nth-child(4){color:var(--accent)}
+.azrep tr.lo td:nth-child(4),.azrep tr.hi td:nth-child(4){color:var(--start)}
+.azrep tr.na td{color:var(--muted);font-size:12px}
+.azscst{font-size:12px;color:var(--accent);display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:6px}.azscst:empty{display:none}
+.azscst button{font-size:12px;padding:4px 8px}
+@media (max-width:860px){.azstage{height:420px}}
 .s3pre{display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .s3pre button{padding:5px 6px;font-size:12px}
 .s3pre button.on{background:var(--accent);color:#0b1a12;border-color:var(--accent);font-weight:650}
@@ -145,7 +175,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <body>
 <header>
   <h1>Golf Swing Model</h1>
-  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button></nav>
+  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button></nav>
   <span>Right-handed golfer</span>
 </header>
 
@@ -247,6 +277,66 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
       <div class="shape" id="s3Strike"></div>
       <table class="tgt s3cmp" id="s3CmpTbl" hidden></table>
       <p class="hint" style="margin:8px 0 0">Kinematic model: the hands travel on a circle around a swing centre in the upper chest, which moves with the pressure shift, tilt, posture and height sliders. Hip and chest turn are drawn for sequencing; the club's path and strike come from those body translations plus the plane, direction, release and face sliders. The default swing is calibrated to a centred, square, tour-like strike.</p>
+    </div>
+  </main>
+</div>
+
+<div class="app" id="tabAz" hidden>
+  <aside>
+    <div class="card">
+      <h2>Video</h2>
+      <p class="hint">Your video stays on this device: it is played locally and never uploaded.</p>
+      <div class="azrow"><button class="primary" onclick="document.getElementById('azFileA').click()">Load swing A</button><button onclick="document.getElementById('azFileB').click()">Load swing B</button></div>
+      <input type="file" id="azFileA" accept="video/*" hidden><input type="file" id="azFileB" accept="video/*" hidden>
+      <label class="azchk"><input type="checkbox" id="azCompare"> Side by side (synced at impact)</label>
+      <div class="azrow2">
+        <div class="ctrl"><div class="row"><span>Frame rate</span></div><select id="azFps"><option value="30">30 fps</option><option value="60">60 fps</option><option value="120">120 fps</option><option value="240">240 fps</option></select></div>
+        <div class="ctrl"><div class="row"><span>Target is</span></div><select id="azDir"><option value="1">to the right</option><option value="-1">to the left</option></select></div>
+      </div>
+      <p class="hint" id="azActive" style="margin:0"></p>
+    </div>
+    <div class="card">
+      <h2>Draw</h2>
+      <div class="aztools" id="azTools"></div>
+      <div class="azcolors" id="azColors"></div>
+      <div id="azScaleRow" class="azscale" hidden>
+        <p class="hint" style="margin:6px 0">Turns distances in the video into inches, so the report card can check how far your head, shoulders, hips and hands move. Angles don't need it. Drag along something of known length in the same plane as the golfer (the ball is easiest), then set its real length.</p>
+        <div class="azrow"><input type="number" id="azReal" value="1.68" step="0.01" min="0.1"> <span class="hint" style="margin:0">in</span></div>
+        <div class="azrow"><button data-real="1.68">Ball</button><button data-real="37">7 iron</button><button data-real="45.5">Driver</button></div>
+      </div>
+      <div class="azscst" id="azScaleSt"></div>
+      <div class="ctrl" style="margin-top:8px"><div class="row"><span>New drawings appear on</span></div><select id="azScope"><option value="all">every frame</option><option value="frame">this frame only</option></select></div>
+      <div class="azrow"><button id="azDel">Delete selected</button><button id="azClear">Clear drawings</button></div>
+    </div>
+    <div class="card">
+      <h2>Checkpoints</h2>
+      <p class="hint">Scrub to each position and press Set. Swing B syncs to A at impact.</p>
+      <div id="azCps"></div>
+    </div>
+    <div class="card" id="azPtsCard">
+      <h2>Track points</h2>
+      <p class="hint">At each checkpoint, pick a body point and click it on the video. The next point is selected automatically.</p>
+      <div class="azpts" id="azPts"></div>
+      <button id="azClearPts" style="margin-top:6px;width:100%">Clear points at this checkpoint</button>
+    </div>
+  </aside>
+  <main>
+    <div class="view">
+      <div class="azstage"><div class="azpane" id="azPaneA"><video playsinline muted preload="auto"></video><canvas></canvas><div class="azempty">Load a swing video<br><span>click here or use “Load swing A”</span></div></div>
+        <div class="azpane" id="azPaneB" hidden><video playsinline muted preload="auto"></video><canvas></canvas><div class="azempty">Load swing B<br><span>to compare side by side</span></div></div></div>
+      <div class="s3time">
+        <button class="primary" id="azPlay">▶ Play</button><button id="azBack" title="Previous frame (←)">◀</button><button id="azFwd" title="Next frame (→)">▶</button>
+        <input type="range" id="azT" min="0" max="1" step="0.001" value="0">
+        <label>Speed <select id="azRate" style="width:auto"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25" selected>¼×</option><option value="0.1">0.1×</option></select></label>
+        <button id="azSave">Save frame</button>
+      </div>
+      <canvas id="azMarks"></canvas>
+      <p class="hint" id="azMsg" style="margin:0;padding:0 12px 8px"></p>
+    </div>
+    <div class="card">
+      <h2>Measurements</h2>
+      <div id="azTable"></div>
+      <p class="hint" style="margin:6px 0 0">Keys: ← → step a frame (Shift: 10 frames) · Space play/pause · Delete removes the selected drawing · Esc cancels.</p>
     </div>
   </main>
 </div>
@@ -1374,11 +1464,14 @@ function showTab(t) {
   document.getElementById('tabDiag').hidden = t !== 'diag';
   document.getElementById('tabLearn').hidden = t !== 'learn';
   document.getElementById('tab3d').hidden = t !== 's3';
+  document.getElementById('tabAz').hidden = t !== 'az';
+  if (t !== 'az' && az.started) azPause();
   if (t !== 's3' && typeof s3Stop === 'function' && s3Res) s3Stop();
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   if (t === 'model') render();
   else if (t === 'diag') renderDiag();
   else if (t === 's3') { if (!s3Res) s3Init(); else s3Draw(); }
+  else if (t === 'az') { if (!az.started) azInit(); azDraw(); }
   else if (!learnStarted) { learnStarted = true; showTopic('aoa'); }
   else learnDraws.forEach(d => d());
 }
@@ -2699,6 +2792,365 @@ function s3Init() {
   };
   s3Anim.t = 0; s3Update();
   window.addEventListener('resize', s3Draw);
+}
+
+// =====================================================================
+// Analyze: video markup and measurement. Everything stays in the browser; the video is never uploaded.
+// Shapes and tracked points are stored in video pixel coordinates so they survive resizing.
+// =====================================================================
+const AZ_TOOLS = [['select', 'Select'], ['line', 'Line'], ['angle', 'Angle (3 clicks)'], ['vert', '∠ vertical'], ['horz', '∠ horizontal'], ['circle', 'Circle'], ['box', 'Box'], ['free', 'Draw'], ['point', 'Track point'], ['scale', 'Set scale']];
+const AZ_CP = [['address', 'Address'], ['top', 'Top'], ['p6', 'P6'], ['impact', 'Impact'], ['finish', 'Finish']];
+const AZ_PTS = [['head', 'Head'], ['shL', 'Lead shoulder'], ['shT', 'Trail shoulder'], ['hipL', 'Lead hip'], ['hipT', 'Trail hip'], ['hands', 'Hands'], ['club', 'Clubhead']];
+const AZ_COLORS = ['#ffd45c', '#ff5c7a', '#4aa8ff', '#5fd39a', '#b48cff', '#ffffff'];
+const az = { tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, started: false, msg: '' };
+const azNewPane = i => ({ i, video: null, name: '', shapes: [], cps: {}, pts: {}, scale: null, dir: 1, wrap: null, cv: null });
+
+// ---- geometry helpers ----
+function azRect(p) {
+  const W = p.wrap.clientWidth, H = p.wrap.clientHeight, v = p.video, vw = v && v.videoWidth || 16, vh = v && v.videoHeight || 9, k = Math.min(W / vw, H / vh);
+  return { x: (W - vw * k) / 2, y: (H - vh * k) / 2, k, vw, vh };
+}
+const azToS = (p, q) => { const r = azRect(p); return [r.x + q.x * r.k, r.y + q.y * r.k]; };
+const azToV = (p, sx, sy) => { const r = azRect(p); return { x: (sx - r.x) / r.k, y: (sy - r.y) / r.k }; };
+const azDist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const azSegD = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1, u = clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / L, 0, 1); return Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy); };
+const azFrameT = () => 0.5 / az.fps;
+// length in inches when a scale is set, else in % of the video height
+function azLen(p, a, b) { const d = azDist(a, b); return p.scale ? `${(d * p.scale).toFixed(1)} in` : `${(d / azRect(p).vh * 100).toFixed(1)}%`; }
+const azUnit = p => p.scale ? 'in' : '% ht';
+const azMove = (p, d) => p.scale ? d * p.scale : d / azRect(p).vh * 100;
+// time in pane p that matches the master pane's time (synced at impact, else address)
+function azOffset() {
+  const [A, B] = az.panes; if (!B.video) return 0;
+  for (const k of ['impact', 'address']) if (A.cps[k] != null && B.cps[k] != null) return A.cps[k] - B.cps[k];
+  return 0;
+}
+const azT = p => p.video ? p.video.currentTime : 0;
+// duration, falling back to the seekable range for files that don't report one
+const azDur = p => { const v = p.video; if (!v) return 0; if (isFinite(v.duration) && v.duration > 0) return v.duration; return v.seekable && v.seekable.length ? v.seekable.end(0) : 0; };
+// checkpoint at the pane's current frame
+function azCpAt(p) { const t = azT(p); for (const [k] of AZ_CP) if (p.cps[k] != null && Math.abs(p.cps[k] - t) <= azFrameT() + 1e-3) return k; return null; }
+
+// ---- drawing ----
+function azShape(ctx, p, s, sel) {
+  const S = q => azToS(p, q), P = s.pts.map(S), col = s.color;
+  ctx.save(); ctx.lineWidth = sel ? 3.5 : 2.5; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const seg = (a, b, dash) => { ctx.save(); if (dash) { ctx.setLineDash(dash); ctx.lineWidth = 1.5; } ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); ctx.restore(); };
+  const tag = (txt, q) => label(ctx, txt, q[0] + 10, q[1] - 12, col, 'left');
+  if (s.type === 'line' || s.type === 'scale') {
+    seg(P[0], P[1]); const a = Math.atan2(-(s.pts[1].y - s.pts[0].y), s.pts[1].x - s.pts[0].x) * R2D;
+    tag(s.type === 'scale' ? `scale ${s.real} in` : `${azLen(p, s.pts[0], s.pts[1])} · ${Math.abs(a > 90 ? 180 - a : a < -90 ? -180 - a : a).toFixed(1)}°`, P[1]);
+  } else if (s.type === 'vert' || s.type === 'horz') {
+    seg(P[0], P[1]);
+    const L = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]);
+    const ref = s.type === 'vert' ? [P[0][0], P[0][1] + (P[1][1] > P[0][1] ? L : -L)] : [P[0][0] + (P[1][0] > P[0][0] ? L : -L), P[0][1]];
+    seg(P[0], ref, [5, 4]);
+    const dx = s.pts[1].x - s.pts[0].x, dy = s.pts[1].y - s.pts[0].y;
+    const ang = s.type === 'vert' ? Math.atan2(Math.abs(dx), Math.abs(dy)) * R2D : Math.atan2(Math.abs(dy), Math.abs(dx)) * R2D;
+    tag(`${ang.toFixed(1)}° from ${s.type === 'vert' ? 'vertical' : 'horizontal'}`, P[1]);
+  } else if (s.type === 'angle') {
+    seg(P[1], P[0]); if (P[2]) { seg(P[1], P[2]);
+      const a1 = Math.atan2(P[0][1] - P[1][1], P[0][0] - P[1][0]), a2 = Math.atan2(P[2][1] - P[1][1], P[2][0] - P[1][0]);
+      let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      ctx.beginPath(); ctx.arc(P[1][0], P[1][1], 22, a1, a2, d < 0); ctx.stroke();
+      tag(`${Math.abs(d * R2D).toFixed(1)}°`, P[1]); }
+  } else if (s.type === 'circle') {
+    const r = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]); ctx.beginPath(); ctx.arc(P[0][0], P[0][1], r, 0, 7); ctx.stroke();
+  } else if (s.type === 'box') {
+    ctx.strokeRect(Math.min(P[0][0], P[1][0]), Math.min(P[0][1], P[1][1]), Math.abs(P[1][0] - P[0][0]), Math.abs(P[1][1] - P[0][1]));
+  } else if (s.type === 'free') {
+    ctx.beginPath(); P.forEach((q, i) => i ? ctx.lineTo(...q) : ctx.moveTo(...q)); ctx.stroke();
+  }
+  if (sel && s.type !== 'free') for (const q of P) { ctx.fillStyle = '#0e1311'; ctx.beginPath(); ctx.arc(q[0], q[1], 5, 0, 7); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke(); }
+  ctx.restore();
+}
+function azDrawPane(p) {
+  if (!p.cv || p.wrap.offsetParent === null) return;
+  const { ctx } = prep(p.cv), t = azT(p);
+  if (!p.video) return;
+  const vis = s => (s.type !== 'scale' || az.tool === 'scale') && (s.t == null || Math.abs(s.t - t) <= azFrameT() + 1e-3);   // the scale line only shows while setting it
+  p.shapes.forEach((s, i) => { if (vis(s)) azShape(ctx, p, s, az.sel && az.sel.p === p.i && az.sel.k === i); });
+  if (az.draft && az.draft.p === p.i) azShape(ctx, p, az.draft.s, false);
+  // tracked points: this checkpoint's points, with a trail from where they were at address
+  const cp = azCpAt(p), here = cp && p.pts[cp] || {}, base = p.pts.address || {};
+  for (const [k, nm] of AZ_PTS) {
+    const q = here[k]; if (!q) continue;
+    const s = azToS(p, q), b = base[k];
+    if (b && cp !== 'address') { const sb = azToS(p, b); ctx.save(); ctx.setLineDash([3, 3]); line(ctx, [sb, s], 'rgba(255,255,255,0.7)', 1.5); ctx.restore(); dot2(ctx, sb, 4, 'rgba(255,255,255,0.45)'); }
+    dot2(ctx, s, 6, '#0e1311'); dot2(ctx, s, 4.5, COL.accent);
+    label(ctx, nm, s[0] + 9, s[1], COL.accent, 'left');
+  }
+  if (here.shL && here.shT) line(ctx, [azToS(p, here.shT), azToS(p, here.shL)], 'rgba(95,211,154,0.6)', 1.5);
+  if (here.hipL && here.hipT) line(ctx, [azToS(p, here.hipT), azToS(p, here.hipL)], 'rgba(95,211,154,0.6)', 1.5);
+  if (here.hands && here.club) line(ctx, [azToS(p, here.hands), azToS(p, here.club)], 'rgba(95,211,154,0.6)', 1.5);
+  // status
+  const fr = Math.round(t * az.fps);
+  label(ctx, `${p.i ? 'B' : 'A'} · ${t.toFixed(3)} s · frame ${fr}${cp ? ' · ' + AZ_CP.find(c => c[0] === cp)[1] : ''}`, 10, 16, COL.text);
+  if (az.compare && az.active === p.i) { ctx.save(); ctx.strokeStyle = COL.accent; ctx.lineWidth = 2; ctx.strokeRect(1, 1, p.cv.clientWidth - 2, p.cv.clientHeight - 2); ctx.restore(); }
+}
+function azDraw() {
+  az.panes.forEach(azDrawPane);
+  const A = az.panes[0], tEl = document.getElementById('azT');
+  const dur = azDur(A);
+  if (dur) { tEl.max = dur; if (!az.scrub) tEl.value = A.video.currentTime; }   // leave the thumb alone while it's being dragged
+  azMarks(); azTable();
+  document.getElementById('azMsg').textContent = az.msg;
+}
+// checkpoint markers under the scrub bar
+function azMarks() {
+  const cv = document.getElementById('azMarks'), { ctx, w, h } = prep(cv), A = az.panes[0];
+  if (!A.video || !azDur(A)) return;
+  const X = t => 8 + t / azDur(A) * (w - 16), off = azOffset();
+  az.marks = [];
+  for (const [pi, p] of az.panes.entries()) { if (!p.video || (pi && !az.compare)) continue;
+    for (const [k, nm] of AZ_CP) if (p.cps[k] != null) { const x = X(p.cps[k] + (pi ? off : 0)); az.marks.push({ x, t: p.cps[k] + (pi ? off : 0) }); line(ctx, [[x, pi ? 12 : 2], [x, pi ? 22 : 12]], pi ? COL.plane : COL.accent, 2);
+      ctx.save(); ctx.font = '10px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center'; ctx.fillText(nm, x, pi ? 32 : 32 - 0); ctx.restore(); } }
+}
+
+// ---- measurements ----
+// ---- report card: typical good-player ranges (face-on camera, mid iron). Rough guides; camera height and angle shift them. ----
+// value(p) returns a number or null; 'in' checks need a scale.
+const azTilt = (L, Tr) => (L && Tr) ? Math.atan2(Tr.y - L.y, Math.abs(Tr.x - L.x)) * R2D : null;
+const azMv = (p, k, cp, axis) => { const a = p.pts.address && p.pts.address[k], b = p.pts[cp] && p.pts[cp][k]; if (!a || !b || !p.scale) return null;
+  return axis === 'x' ? (b.x - a.x) * p.dir * p.scale : (a.y - b.y) * p.scale; };
+const azLean = (p, cp) => { const q = p.pts[cp]; return q && q.hands && q.club ? Math.atan2((q.hands.x - q.club.x) * p.dir, q.club.y - q.hands.y) * R2D : null; };
+const AZ_REF = [
+  { id: 'tiltA', name: 'Shoulder tilt at address', cp: 'address', u: '°', r: [2, 12], f: p => azTilt(p.pts.address?.shL, p.pts.address?.shT),
+    lo: 'Lead shoulder low or level at setup: often from the ball too far forward or the trail hand not under.', hi: 'Lots of tilt away at setup: can encourage hanging back.' },
+  { id: 'tiltI', name: 'Shoulder tilt at impact', cp: 'impact', u: '°', r: [25, 45], f: p => azTilt(p.pts.impact?.shL, p.pts.impact?.shT),
+    lo: 'Shoulders too level at impact: the lead shoulder is low. This is what a lead shoulder dip looks like, and it usually comes with a flip.', hi: 'Very tilted at impact: hanging back on the trail side, low point moves back.' },
+  { id: 'shLy', name: 'Lead shoulder height, address → impact', cp: 'impact', u: 'in', r: [0, 4], f: p => azMv(p, 'shL', 'impact', 'y'),
+    lo: 'Lead shoulder ends lower than it started: a dip. The lead arm hangs from it, so the club goes deeper.', hi: 'Lead shoulder rises a lot: often standing up through impact.' },
+  { id: 'headX', name: 'Head toward target, address → impact', cp: 'impact', u: 'in', r: [-3, 1], f: p => azMv(p, 'head', 'impact', 'x'),
+    lo: 'Head moves well back: hanging back or too much tilt.', hi: 'Head moves toward the target: lunging or sliding, steepens the swing.' },
+  { id: 'headY', name: 'Head height, address → impact', cp: 'impact', u: 'in', r: [-2, 0.5], f: p => azMv(p, 'head', 'impact', 'y'),
+    lo: 'Head drops: dipping into the ball, usually with the lead shoulder.', hi: 'Head rises: standing up / early extension, thin and heel contact.' },
+  { id: 'headXT', name: 'Head toward target at the top', cp: 'top', u: 'in', r: [-3, 1], f: p => azMv(p, 'head', 'top', 'x'),
+    lo: 'Big move off the ball in the backswing.', hi: 'Head moves toward the target in the backswing: reverse pivot.' },
+  { id: 'hipT', name: 'Trail hip toward target at the top', cp: 'top', u: 'in', r: [-1.5, 2], f: p => azMv(p, 'hipT', 'top', 'x'),
+    lo: 'Trail hip slides away from the target: a sway.', hi: 'Trail hip moves toward the target in the backswing: reverse pivot.' },
+  { id: 'hipL', name: 'Lead hip toward target, address → impact', cp: 'impact', u: 'in', r: [2, 6], f: p => azMv(p, 'hipL', 'impact', 'x'),
+    lo: 'Little pressure shift: the hips stall or hang back, low point moves behind the ball.', hi: 'Hips slide toward the target without turning.' },
+  { id: 'hipTI', name: 'Hip tilt at impact', cp: 'impact', u: '°', r: [3, 15], f: p => azTilt(p.pts.impact?.hipL, p.pts.impact?.hipT),
+    lo: 'Lead hip low or level: the lead leg is not posting up.', hi: 'Lead hip very high: often a big lateral slide or straightening early.' },
+  { id: 'handsX', name: 'Hands toward target, address → impact', cp: 'impact', u: 'in', r: [1.5, 6], f: p => azMv(p, 'hands', 'impact', 'x'),
+    lo: 'Hands arrive at or behind where they started: the clubhead has passed them (flip).', hi: 'Hands well ahead: very strong forward lean, check the strike is not low.' },
+  { id: 'leanA', name: 'Shaft lean at address', cp: 'address', u: '°', r: [-2, 6], f: p => azLean(p, 'address'),
+    lo: 'Shaft leans away from the target at setup.', hi: 'Lots of forward press: fine if it matches impact.' },
+  { id: 'leanI', name: 'Shaft lean at impact', cp: 'impact', u: '°', r: [4, 14], f: p => azLean(p, 'impact'),
+    lo: 'Little or backward shaft lean: the hands flipped. Adds loft and moves the low point back.', hi: 'Very strong lean: delofted, can come out low.' },
+];
+// patterns: combinations of flags that point at one story
+const AZ_PATTERNS = [
+  { when: s => s.tiltI === 'lo' && (s.leanI === 'lo' || s.handsX === 'lo'), text: '<b>Dip and flip.</b> Level shoulders at impact plus little shaft lean: the lead shoulder dropped, the club went deep, and the hands flipped to save it. Work on the lead shoulder rising through impact before the hands.' },
+  { when: s => (s.shLy === 'lo' || s.headY === 'lo') && s.tiltI !== 'lo', text: '<b>Dipping.</b> The head or lead shoulder drops toward the ball in the downswing, which sends the club deeper.' },
+  { when: s => s.hipL === 'lo' && (s.leanI === 'lo' || s.handsX === 'lo'), text: '<b>Stall and flip.</b> The hips do not get toward the target and the hands throw the club to catch up.' },
+  { when: s => s.headY === 'hi' || s.shLy === 'hi', text: '<b>Standing up.</b> The body rises through impact: thin and heel strikes, often with an open face.' },
+  { when: s => s.hipT === 'lo' || s.headXT === 'lo', text: '<b>Sway.</b> The body slides away from the target in the backswing, so it has further to get back.' },
+  { when: s => s.hipT === 'hi' || s.headXT === 'hi', text: '<b>Reverse pivot.</b> The body moves toward the target in the backswing, then has to fall back.' },
+];
+function azReport(p) {
+  const rows = [], state = {};
+  for (const c of AZ_REF) {
+    if (p.cps[c.cp] == null) continue;
+    const v = c.f(p);
+    if (v == null) { if (c.u === 'in' && !p.scale && p.pts[c.cp]) rows.push(`<tr class="na"><td>${c.name}</td><td colspan="3">set a scale to measure this</td></tr>`); continue; }
+    const st = v < c.r[0] ? 'lo' : v > c.r[1] ? 'hi' : 'ok'; state[c.id] = st;
+    const fmt = x => fmtSigned(x, 1) + (c.u === '°' ? '°' : ' in');
+    rows.push(`<tr class="${st}"><td>${c.name}</td><td><b>${fmt(v)}</b></td><td style="white-space:nowrap">${fmtSigned(c.r[0], 0)} to ${fmtSigned(c.r[1], 0)}${c.u === '°' ? '°' : ' in'}</td><td>${st === 'ok' ? '✓ in range' : (st === 'lo' ? '▼ ' + c.lo : '▲ ' + c.hi)}</td></tr>`);
+  }
+  if (!rows.length) return '';
+  const pats = AZ_PATTERNS.filter(x => x.when(state)).map(x => `<li>${x.text}</li>`);
+  const n = Object.values(state).filter(x => x !== 'ok').length;
+  return `<h3 class="azh">Report card · ${p.i ? 'Swing B' : 'Swing A'}</h3>
+    ${pats.length ? `<div class="callout"><b>Patterns</b><ul style="margin:6px 0 0">${pats.join('')}</ul></div>` : `<p class="hint">${n ? `${n} check${n > 1 ? 's' : ''} outside the typical range, no combined pattern.` : 'Everything measured is inside the typical range.'}</p>`}
+    <table class="tgt azrep"><thead><tr><th>Check</th><th>You</th><th>Typical</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>
+    <p class="hint">Ranges are rough guides for good players with a mid iron, filmed face-on at hand height from straight in front. Camera angle shifts them, so the most reliable comparison is your own swings: load a good one as swing B.</p>`;
+}
+function azTable() {
+  const el = document.getElementById('azTable'), panes = az.panes.filter((p, i) => p.video && (!i || az.compare));
+  el.innerHTML = panes.map(p => {
+    const cps = AZ_CP.filter(([k]) => p.cps[k] != null && p.pts[k]);
+    if (!cps.length) return `<p class="hint">${p.i ? 'Swing B' : 'Swing A'}: set checkpoints and track points to see measurements here.</p>`;
+    const base = p.pts.address || {}, u = azUnit(p), d = p.dir;
+    const mv = (k, cp) => { const a = base[k], b = p.pts[cp][k]; if (!a || !b) return '–';
+      const dx = azMove(p, (b.x - a.x) * d), dy = azMove(p, a.y - b.y);
+      return `${dx >= 0 ? '→' : '←'}${Math.abs(dx).toFixed(1)} ${dy >= 0 ? '↑' : '↓'}${Math.abs(dy).toFixed(1)}`; };
+    const tiltOf = (L, Tr) => (L && Tr) ? Math.atan2(Tr.y - L.y, Math.abs(Tr.x - L.x)) * R2D : null;          // + = lead side higher
+    const rows = [];
+    for (const [k, nm] of AZ_PTS) if (cps.some(([c]) => p.pts[c][k])) rows.push([`${nm} moved (${u})`, cps.map(([c]) => c === 'address' ? (p.pts[c][k] ? '·' : '–') : mv(k, c))]);
+    const der = [
+      ['Shoulder tilt (lead side up +)', c => tiltOf(p.pts[c].shL, p.pts[c].shT), '°'],
+      ['Hip tilt (lead side up +)', c => tiltOf(p.pts[c].hipL, p.pts[c].hipT), '°'],
+      ['Shaft lean (hands ahead +)', c => { const H = p.pts[c].hands, C = p.pts[c].club; return H && C ? Math.atan2((H.x - C.x) * d, C.y - H.y) * R2D : null; }, '°'],
+    ];
+    for (const [nm, f, unit] of der) { const v = cps.map(([c]) => f(c)); if (v.some(x => x != null)) rows.push([nm, v.map(x => x == null ? '–' : fmtSigned(x, 1) + unit)]); }
+    return `<h3 class="azh">${p.i ? 'Swing B' : 'Swing A'}${p.name ? ' · ' + p.name : ''}</h3><table class="tgt"><thead><tr><th></th>${cps.map(([, nm]) => `<th>${nm}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(([nm, v]) => `<tr><td>${nm}</td>${v.map(x => `<td>${x}</td>`).join('')}</tr>`).join('')}</tbody></table>${azReport(p)}`;
+  }).join('') + `<p class="hint">Movement is measured from the address position: → toward the target, ↑ up. Tilts and shaft lean assume a face-on camera. ${az.panes[0].scale ? '' : 'Set a scale to get inches.'}</p>`;
+}
+
+// ---- interaction ----
+function azHit(p, q) {
+  const tol = 9 / azRect(p).k, t = azT(p);
+  for (let i = p.shapes.length - 1; i >= 0; i--) {
+    const s = p.shapes[i]; if (s.type === 'scale' && az.tool !== 'scale' || !(s.t == null || Math.abs(s.t - t) <= azFrameT() + 1e-3)) continue;
+    for (let j = 0; j < s.pts.length; j++) if (s.type !== 'free' && azDist(q, s.pts[j]) < tol) return { k: i, h: j };
+    const P = s.pts;
+    let d = 1e9;
+    if (s.type === 'circle') d = Math.abs(azDist(q, P[0]) - azDist(P[0], P[1]));
+    else if (s.type === 'box') { const a = P[0], b = P[1], c = { x: a.x, y: b.y }, e = { x: b.x, y: a.y }; d = Math.min(azSegD(q, a, e), azSegD(q, e, b), azSegD(q, b, c), azSegD(q, c, a)); }
+    else for (let j = 1; j < P.length; j++) d = Math.min(d, azSegD(q, P[j - 1], P[j]));
+    if (d < tol) return { k: i, h: -1 };
+  }
+  return null;
+}
+function azPointer(p, e, kind) {
+  if (!p.video) return;
+  const r = p.cv.getBoundingClientRect(), q = azToV(p, e.clientX - r.left, e.clientY - r.top), tl = az.tool;
+  if (kind === 'down' && az.active !== p.i) { az.active = p.i; azSyncSide(); }
+  const scopeT = az.scope === 'frame' ? azT(p) : null;
+  if (kind === 'down') {
+    p.cv.setPointerCapture(e.pointerId);
+    if (tl === 'select') { const h = azHit(p, q); az.sel = h ? { p: p.i, k: h.k } : null; az.drag = h ? { h: h.h, last: q } : null; }
+    else if (tl === 'angle') {
+      if (!az.draft) az.draft = { p: p.i, s: { type: 'angle', pts: [q, q], color: az.color, t: scopeT } };
+      else { const P = az.draft.s.pts; P[P.length - 1] = q; if (P.length === 3) { p.shapes.push(az.draft.s); az.draft = null; } else P.push(q); }   // clicks: end, vertex, end
+    } else if (tl === 'point') {
+      const cp = azCpAt(p);
+      if (!cp) az.msg = 'Go to a checkpoint first (set one in the Checkpoints card), then click the body point.';
+      else { (p.pts[cp] = p.pts[cp] || {})[az.ptName] = q; az.msg = '';
+        const i = AZ_PTS.findIndex(x => x[0] === az.ptName); az.ptName = AZ_PTS[(i + 1) % AZ_PTS.length][0]; azSyncSide(); }
+    } else az.draft = { p: p.i, s: { type: tl, pts: tl === 'free' ? [q] : [q, q], color: tl === 'scale' ? '#ffffff' : az.color, t: tl === 'scale' ? null : scopeT } };
+  } else if (kind === 'move') {
+    if (az.drag && az.sel && az.sel.p === p.i) {
+      const s = p.shapes[az.sel.k];
+      if (az.drag.h >= 0) s.pts[az.drag.h] = q;
+      else { const dx = q.x - az.drag.last.x, dy = q.y - az.drag.last.y; s.pts = s.pts.map(t => ({ x: t.x + dx, y: t.y + dy })); }
+      az.drag.last = q; if (s.type === 'scale') azApplyScale(p, s);
+    } else if (az.draft && az.draft.p === p.i) {
+      const s = az.draft.s;
+      if (s.type === 'free') { if (e.buttons) s.pts.push(q); }
+      else if (s.type === 'angle') s.pts[s.pts.length - 1] = q;
+      else if (e.buttons) s.pts[1] = q;
+    } else return;
+  } else if (kind === 'up') {
+    az.drag = null;
+    if (az.draft && az.draft.p === p.i && az.draft.s.type !== 'angle') {
+      const s = az.draft.s; az.draft = null;
+      if (s.pts.length > 1 && azDist(s.pts[0], s.pts[s.pts.length - 1]) * azRect(p).k > 4 || s.type === 'free' && s.pts.length > 3) {
+        if (s.type === 'scale') { p.shapes = p.shapes.filter(x => x.type !== 'scale'); s.real = +document.getElementById('azReal').value || 1.68; azApplyScale(p, s); }
+        p.shapes.push(s); az.sel = { p: p.i, k: p.shapes.length - 1 }; if (s.type === 'scale') azSyncSide();
+      }
+    }
+  }
+  azDraw();
+}
+function azApplyScale(p, s) { p.scale = s.real / Math.max(1, azDist(s.pts[0], s.pts[1])); }
+function azSetTime(t) {
+  const [A, B] = az.panes; if (!A.video) return;
+  A.video.currentTime = clamp(t, 0, azDur(A));
+  if (az.compare && B.video) B.video.currentTime = clamp(A.video.currentTime - azOffset(), 0, azDur(B));
+}
+function azStep(n) { azPause(); azSetTime(azT(az.panes[0]) + n / az.fps); }
+function azPlay() {
+  const [A, B] = az.panes; if (!A.video) return;
+  const rate = +document.getElementById('azRate').value;
+  if (A.video.ended || A.video.currentTime >= azDur(A) - 1e-3) azSetTime(0);
+  for (const p of [A, B]) if (p.video && (p === A || az.compare)) { p.video.playbackRate = rate; p.video.play(); }
+  document.getElementById('azPlay').textContent = '❚❚ Pause';
+  const loop = () => {
+    az.raf = 0; if (A.video.paused) return azPause();
+    if (az.compare && B.video) { const want = A.video.currentTime - azOffset(); if (Math.abs(B.video.currentTime - want) > 1.5 / az.fps) B.video.currentTime = clamp(want, 0, azDur(B)); }
+    azDraw(); az.raf = requestAnimationFrame(loop);
+  };
+  if (!az.raf) az.raf = requestAnimationFrame(loop);
+}
+function azPause() { for (const p of az.panes) if (p.video) p.video.pause(); if (az.raf) cancelAnimationFrame(az.raf); az.raf = 0; document.getElementById('azPlay').textContent = '▶ Play'; azDraw(); }
+function azLoad(i, file) {
+  const p = az.panes[i]; if (!file) return;
+  if (p.video && p.video.src) URL.revokeObjectURL(p.video.src);
+  const v = p.wrap.querySelector('video'); v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true; p.video = v; p.name = file.name;
+  p.shapes = []; p.cps = {}; p.pts = {}; p.scale = null;
+  v.onloadedmetadata = () => { v.currentTime = 0; azDraw(); };
+  v.onseeked = () => azDraw();
+  p.wrap.querySelector('.azempty').hidden = true;
+  if (i) { az.compare = true; document.getElementById('azCompare').checked = true; azLayout(); }
+  az.active = i; azSyncSide(); azDraw();
+}
+function azLayout() { document.getElementById('azPaneB').hidden = !az.compare; azDraw(); }
+// sidebar state for the active pane
+function azSyncSide() {
+  const p = az.panes[az.active];
+  document.querySelectorAll('#azTools [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === az.tool));
+  document.querySelectorAll('#azColors [data-col]').forEach(b => b.classList.toggle('on', b.dataset.col === az.color));
+  document.querySelectorAll('#azPts [data-pt]').forEach(b => { b.classList.toggle('on', b.dataset.pt === az.ptName); });
+  document.getElementById('azScaleRow').hidden = az.tool !== 'scale';
+  const sc = document.getElementById('azScaleSt');
+  sc.innerHTML = p.scale ? `Scale set: inches on${az.compare ? ` (swing ${p.i ? 'B' : 'A'})` : ''} <button id="azScaleOff">Remove scale</button>` : '';
+  if (p.scale) document.getElementById('azScaleOff').onclick = () => { p.shapes = p.shapes.filter(x => x.type !== 'scale'); p.scale = null; az.sel = null; azSyncSide(); azDraw(); };
+  document.getElementById('azPtsCard').classList.toggle('dim', az.tool !== 'point');
+  document.getElementById('azDir').value = p.dir;
+  document.getElementById('azActive').textContent = az.compare ? `Editing swing ${p.i ? 'B' : 'A'}` : '';
+  document.querySelectorAll('#azCps [data-cp]').forEach(b => { const k = b.dataset.cp; b.closest('.azcp').classList.toggle('set', p.cps[k] != null); });
+}
+function azSaveFrame() {
+  const p = az.panes[az.active]; if (!p.video) return;
+  const v = p.video, c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  const ctx = c.getContext('2d'); ctx.drawImage(v, 0, 0);
+  // redraw the overlay at video resolution
+  const keep = { wrap: p.wrap }, fake = { ...p, wrap: { clientWidth: v.videoWidth, clientHeight: v.videoHeight, offsetParent: 1 } };
+  const t = azT(p); p.shapes.filter(s => s.t == null || Math.abs(s.t - t) <= azFrameT() + 1e-3).forEach(s => azShape(ctx, fake, s, false));
+  c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${(p.name || 'swing').replace(/\.[^.]+$/, '')}-${t.toFixed(2)}s.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); });
+}
+function azInit() {
+  az.panes = [azNewPane(0), azNewPane(1)];
+  az.panes.forEach((p, i) => {
+    p.wrap = document.getElementById(i ? 'azPaneB' : 'azPaneA'); p.cv = p.wrap.querySelector('canvas');
+    for (const [ev, k] of [['pointerdown', 'down'], ['pointermove', 'move'], ['pointerup', 'up']]) p.cv.addEventListener(ev, e => azPointer(p, e, k));
+    p.wrap.querySelector('.azempty').onclick = () => document.getElementById(i ? 'azFileB' : 'azFileA').click();
+  });
+  document.getElementById('azFileA').onchange = e => azLoad(0, e.target.files[0]);
+  document.getElementById('azFileB').onchange = e => azLoad(1, e.target.files[0]);
+  document.getElementById('azTools').innerHTML = AZ_TOOLS.map(([k, nm]) => `<button data-tool="${k}">${nm}</button>`).join('');
+  document.getElementById('azColors').innerHTML = AZ_COLORS.map(c => `<button data-col="${c}" style="background:${c}"></button>`).join('');
+  document.getElementById('azPts').innerHTML = AZ_PTS.map(([k, nm]) => `<button data-pt="${k}">${nm}</button>`).join('');
+  document.getElementById('azCps').innerHTML = AZ_CP.map(([k, nm]) => `<div class="azcp"><button data-cp="${k}">Set ${nm}</button><button data-go="${k}" title="Jump">→</button></div>`).join('');
+  document.querySelectorAll('#azTools [data-tool]').forEach(b => b.onclick = () => { az.tool = b.dataset.tool; az.draft = null; azSyncSide(); azDraw(); });
+  document.querySelectorAll('#azColors [data-col]').forEach(b => b.onclick = () => { az.color = b.dataset.col; const s = az.sel && az.panes[az.sel.p].shapes[az.sel.k]; if (s && s.type !== 'scale') s.color = az.color; azSyncSide(); azDraw(); });
+  document.querySelectorAll('#azPts [data-pt]').forEach(b => b.onclick = () => { az.ptName = b.dataset.pt; az.tool = 'point'; azSyncSide(); });
+  document.querySelectorAll('#azCps [data-cp]').forEach(b => b.onclick = () => { const p = az.panes[az.active]; if (!p.video) return; p.cps[b.dataset.cp] = azT(p); azSyncSide(); azDraw(); });
+  document.querySelectorAll('#azCps [data-go]').forEach(b => b.onclick = () => { const p = az.panes[az.active], t = p.cps[b.dataset.go]; if (t == null) return; azPause();
+    if (p.i === 0) azSetTime(t); else { p.video.currentTime = t; if (az.panes[0].video) az.panes[0].video.currentTime = t + azOffset(); } });
+  document.getElementById('azScope').onchange = e => az.scope = e.target.value;
+  document.getElementById('azFps').onchange = e => { az.fps = +e.target.value; azDraw(); };
+  document.getElementById('azDir').onchange = e => { az.panes[az.active].dir = +e.target.value; azDraw(); };
+  document.getElementById('azCompare').onchange = e => { az.compare = e.target.checked; if (!az.compare) az.active = 0; azLayout(); azSyncSide(); };
+  document.getElementById('azDel').onclick = () => { if (!az.sel) return; const p = az.panes[az.sel.p], s = p.shapes[az.sel.k]; if (s.type === 'scale') p.scale = null; p.shapes.splice(az.sel.k, 1); az.sel = null; azSyncSide(); azDraw(); };
+  document.getElementById('azClear').onclick = () => { const p = az.panes[az.active]; p.shapes = p.shapes.filter(s => s.type === 'scale'); az.sel = null; azDraw(); };
+  document.getElementById('azClearPts').onclick = () => { const p = az.panes[az.active], cp = azCpAt(p); if (cp) delete p.pts[cp]; else p.pts = {}; azDraw(); };
+  document.querySelectorAll('[data-real]').forEach(b => b.onclick = () => { document.getElementById('azReal').value = b.dataset.real; const p = az.panes[az.active], s = p.shapes.find(x => x.type === 'scale'); if (s) { s.real = +b.dataset.real; azApplyScale(p, s); azDraw(); } });
+  document.getElementById('azReal').oninput = e => { const p = az.panes[az.active], s = p.shapes.find(x => x.type === 'scale'); if (s && +e.target.value > 0) { s.real = +e.target.value; azApplyScale(p, s); azDraw(); } };
+  document.getElementById('azPlay').onclick = () => az.panes[0].video && (az.panes[0].video.paused ? azPlay() : azPause());
+  document.getElementById('azBack').onclick = () => azStep(-1); document.getElementById('azFwd').onclick = () => azStep(1);
+  const tEl = document.getElementById('azT');
+  tEl.addEventListener('pointerdown', () => { az.scrub = true; if (az.panes[0].video && !az.panes[0].video.paused) azPause(); });
+  window.addEventListener('pointerup', () => { if (az.scrub) { az.scrub = false; azDraw(); } });
+  tEl.oninput = e => azSetTime(+e.target.value);
+  document.getElementById('azSave').onclick = azSaveFrame;
+  // click a checkpoint marker under the scrub bar to jump to it
+  const mk = document.getElementById('azMarks'), near = e => { const x = e.clientX - mk.getBoundingClientRect().left; let b = null; for (const m of az.marks || []) if (Math.abs(m.x - x) < 14 && (!b || Math.abs(m.x - x) < Math.abs(b.x - x))) b = m; return b; };
+  mk.addEventListener('click', e => { const m = near(e); if (m) { azPause(); azSetTime(m.t); } });
+  mk.addEventListener('mousemove', e => mk.style.cursor = near(e) ? 'pointer' : 'default');
+  document.addEventListener('keydown', e => {
+    if (document.getElementById('tabAz').hidden || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); azStep((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)); }
+    else if (e.key === ' ') { e.preventDefault(); document.getElementById('azPlay').click(); }
+    else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); document.getElementById('azDel').click(); }
+    else if (e.key === 'Escape') { az.draft = null; azDraw(); }
+  });
+  window.addEventListener('resize', () => !document.getElementById('tabAz').hidden && azDraw());
+  az.started = true; azSyncSide(); azLayout();
 }
 </script>
 </body>
