@@ -61,6 +61,9 @@ canvas{display:block;width:100%}
 .tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px}
 .tabs button{border:0;background:transparent;padding:6px 14px;font-weight:600;color:var(--muted)}
 .tabs button.on{background:var(--panel2);color:var(--text)}
+.hand{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px}
+.hand button{border:0;background:transparent;padding:4px 10px;font-size:12px;font-weight:600;color:var(--muted)}
+.hand button.on{background:var(--panel2);color:var(--text)}
 header{align-items:center}
 .app[hidden],.view .bar label[hidden]{display:none}
 #c3s{height:560px;cursor:grab;touch-action:none}
@@ -185,7 +188,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <header>
   <h1>Golf Swing Model</h1>
   <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button></nav>
-  <span>Right-handed golfer</span>
+  <div class="hand" id="hand" data-nolr><button data-hand="R" class="on">Right-handed</button><button data-hand="L">Left-handed</button></div>
 </header>
 
 <div class="app" id="tabModel">
@@ -228,7 +231,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
         <label title="Playback speed for the swing; the ball flight always plays at normal speed">Speed <input type="range" id="playSpeed" min="0.1" max="2" step="0.05" value="1"> <b id="playSpeedV">1.00×</b></label>
         <button class="primary" id="play">▶ Play swing</button>
       </div>
-      <canvas id="c3d"></canvas>
+      <canvas id="c3d" data-mirror></canvas>
       <div class="legend">
         <span style="--c:#e4ebe7">Target line</span>
         <span style="--c:var(--plane)">Swing plane / swing direction</span>
@@ -243,15 +246,15 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
     <div class="grid3">
       <div class="view">
         <div class="bar"><h3>Face-on impact · low point &amp; AoA</h3><label hidden title="Stretches heights/sideways offsets so small angles are visible; numbers stay true">Exaggerate <input type="range" class="exag" min="1" max="8" step="0.5"> <b class="exagv"></b></label></div>
-        <canvas id="cImpact"></canvas>
+        <canvas id="cImpact" data-mirror></canvas>
       </div>
       <div class="view">
         <div class="bar"><h3>Overhead impact · path &amp; face</h3><label hidden title="Stretches heights/sideways offsets so small angles are visible; numbers stay true">Exaggerate <input type="range" class="exag" min="1" max="8" step="0.5"> <b class="exagv"></b></label></div>
-        <canvas id="cTop"></canvas>
+        <canvas id="cTop" data-mirror></canvas>
       </div>
       <div class="view">
         <div class="bar"><h3>Ball flight</h3></div>
-        <canvas id="cFlight"></canvas>
+        <canvas id="cFlight" data-mirror></canvas>
       </div>
     </div>
   </main>
@@ -271,7 +274,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
         <label><input type="checkbox" id="s3o_fp"> Force plate</label>
         <label><input type="checkbox" id="s3o_grf"> Ground forces (3D)</label>
       </div>
-      <div class="s3wrap"><canvas id="c3s"></canvas><canvas id="s3fp"></canvas></div>
+      <div class="s3wrap"><canvas id="c3s" data-mirror></canvas><canvas id="s3fp" data-mirror></canvas></div>
       <div class="s3time">
         <button class="primary" id="s3Play">▶ Play</button>
         <input type="range" id="s3T" min="0" max="2" step="0.001" value="0">
@@ -290,7 +293,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
   </main>
 </div>
 
-<div class="app" id="tabAz" hidden>
+<div class="app" id="tabAz" data-nolr hidden>
   <aside>
     <div class="card">
       <h2>Video</h2>
@@ -716,6 +719,25 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const COL = {};
 ['--text', '--muted', '--accent', '--path', '--face', '--plane', '--start', '--low', '--dirt', '--line', '--panel'].forEach(k => COL[k.slice(2)] = css(k));
 
+// ---- handedness: the model is built right-handed; a left-handed golfer is its mirror image ----
+let LEFTY = false;
+const LR_MAP = { left: 'right', right: 'left', Left: 'Right', Right: 'Left', LEFT: 'RIGHT', RIGHT: 'LEFT' };
+const swapLR = t => t.replace(/\b(left|right|Left|Right|LEFT|RIGHT)\b/g, m => LR_MAP[m]);
+// text drawn on a mirrored canvas is flipped back so it reads normally; arrows and left/right words follow the mirror
+for (const fn of ['fillText', 'strokeText']) {
+  const orig = CanvasRenderingContext2D.prototype[fn];
+  CanvasRenderingContext2D.prototype[fn] = function (text, x, y, ...rest) {
+    const m = this.getTransform(); if (m.a * m.d - m.b * m.c >= 0) return orig.call(this, text, x, y, ...rest);
+    const al = this.textAlign;
+    this.save(); this.translate(x, y); this.scale(-1, 1);
+    this.textAlign = { left: 'right', right: 'left', start: 'right', end: 'left' }[al] || al;
+    const t = swapLR(String(text)), flipped = /^(.*) →$/.test(t) ? '← ' + t.slice(0, -2) : /^← (.*)$/.test(t) ? t.slice(2) + ' →' : t.replace(/[→←]/g, c => c === '→' ? '←' : '→');
+    orig.call(this, flipped, 0, 0, ...rest); this.restore();
+  };
+}
+const isMirrored = ctx => { const m = ctx.getTransform(); return m.a * m.d - m.b * m.c < 0; };
+// draw the box [x0, x0 + w] unmirrored, at its mirrored position (for charts and gauges inside a mirrored scene)
+const unmirror = (ctx, x0, w) => { if (isMirrored(ctx)) { ctx.translate(2 * x0 + w, 0); ctx.scale(-1, 1); } };
 function prep(cv) {
   const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
@@ -723,6 +745,7 @@ function prep(cv) {
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, r.width, r.height);
+  if (LEFTY && cv.hasAttribute('data-mirror')) ctx.setTransform(-dpr, 0, 0, dpr, W, 0);   // left-handed: mirror the scene; text is unmirrored below
   return { ctx, w: r.width, h: r.height };
 }
 function line(ctx, pts, color, w = 1.5, dash = null) {
@@ -763,7 +786,7 @@ let drag = null;
 c3d.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; c3d.setPointerCapture(e.pointerId); });
 c3d.addEventListener('pointermove', e => {
   if (!drag) return;
-  cam.yaw += (e.clientX - drag[0]) * 0.008;
+  cam.yaw += (e.clientX - drag[0]) * 0.008 * (LEFTY ? -1 : 1);
   cam.pitch = clamp(cam.pitch + (e.clientY - drag[1]) * 0.006, -0.1, 1.55);
   drag = [e.clientX, e.clientY]; render();
 });
@@ -1540,8 +1563,10 @@ const STRIKE_NAME = { clean: 'Clean', thin: 'Thin', top: 'Topped', fat: 'Fat' };
 
 // Small line chart (one series) with axes, zero lines and a highlighted point
 function miniChart(ctx, box, xr, yr, fn, pt, opts) {
-  const [x0, y0, w, h] = box;
+  const [x0, y0, w, h] = box, mir = isMirrored(ctx);
   const X = x => x0 + (x - xr[0]) / (xr[1] - xr[0]) * w, Y = y => y0 + h - (y - yr[0]) / (yr[1] - yr[0]) * h;
+  const T = 2 * x0 + w - 42;   // mirrored: keep the y-axis gutter on the chart's left
+  ctx.save(); if (mir) { ctx.translate(T, 0); ctx.scale(-1, 1); }   // charts read left to right in both modes
   ctx.save(); ctx.font = '11px -apple-system,sans-serif'; ctx.fillStyle = COL.muted;
   for (const gx of opts.xt) { line(ctx, [[X(gx), y0], [X(gx), y0 + h]], 'rgba(255,255,255,0.06)', 1); ctx.textAlign = 'center'; ctx.fillText(opts.xf(gx), X(gx), y0 + h + 14); }
   for (const gy of opts.yt) { line(ctx, [[x0, Y(gy)], [x0 + w, Y(gy)]], gy === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)', 1); ctx.textAlign = 'right'; ctx.fillText(opts.yf(gy), x0 - 6, Y(gy) + 4); }
@@ -1551,7 +1576,9 @@ function miniChart(ctx, box, xr, yr, fn, pt, opts) {
   const pts = []; for (let i = 0; i <= 80; i++) { const x = xr[0] + (xr[1] - xr[0]) * i / 80; pts.push([X(x), Y(clamp(fn(x), yr[0], yr[1]))]); }
   line(ctx, pts, opts.color || COL.accent, 2);
   if (pt) { dot2(ctx, [X(pt[0]), Y(pt[1])], 6, COL.panel); dot2(ctx, [X(pt[0]), Y(pt[1])], 4.5, opts.color || COL.accent); }
-  return { X, Y };
+  if (opts.note) label(ctx, opts.note, x0 + w - 4, y0 + 8, COL.muted, 'right', false);
+  ctx.restore();
+  return { X: mir ? x => T - X(x) : X, Y };
 }
 const readout = items => items.map(([k, v, cls]) => `<div class="rd${cls ? ' ' + cls : ''}"><span>${k}</span><b>${v}</b></div>`).join('');
 
@@ -1625,7 +1652,7 @@ function relSim(club, o, mode) {
 const learnDraws = [];
 function mountWidget(el, spec) {
   el.className = 'widget';
-  el.innerHTML = `<canvas style="height:${spec.h || 300}px"></canvas><div class="wread"></div><div class="wctl"></div>${spec.caption ? `<p class="cap">${spec.caption}</p>` : ''}`;
+  el.innerHTML = `<canvas style="height:${spec.h || 300}px"${spec.flat ? '' : ' data-mirror'}></canvas><div class="wread"></div><div class="wctl"></div>${spec.caption ? `<p class="cap">${spec.caption}</p>` : ''}`;
   const cv = el.querySelector('canvas'), ctlEl = el.querySelector('.wctl'), rd = el.querySelector('.wread');
   const vals = {}, hover = { x: null, y: null }, sliders = {};
   const applyUpdates = upd => { for (const [k, val] of Object.entries(upd || {})) { vals[k] = val; const sl = sliders[k]; if (sl) { sl.inp.value = val; sl.b.textContent = sl.fmt(val); } } };
@@ -1715,13 +1742,12 @@ const WIDGETS = {
       // chart: AoA vs low point for this arc, plus a tighter and a wider arc at the same plane
       const box = [viewW + 58, 20, w - viewW - 74, h - 64];
       const { X, Y } = miniChart(ctx, box, [-8, 8], [-10, 10], x => arcAt(x, R, vsp).aoa, [lp, g.aoa],
-        { xt: [-8, -4, 0, 4, 8], yt: [-10, -5, 0, 5, 10], xf: x => (x > 0 ? '+' : '') + x, yf: y => (y > 0 ? '+' : '') + y + '°', xl: 'Low point ahead of ball (in)', yl: 'Attack angle', color: COL.path });
+        { xt: [-8, -4, 0, 4, 8], yt: [-10, -5, 0, 5, 10], xf: x => (x > 0 ? '+' : '') + x, yf: y => (y > 0 ? '+' : '') + y + '°', xl: 'Low point ahead of ball (in)', yl: 'Attack angle', color: COL.path, note: 'dashed: radius 38" (steeper) and 62"' });
       for (const [rr, nm] of [[38, 'R 38"'], [62, 'R 62"']]) {
         if (Math.abs(rr - R) < 1) continue;
         const pts = []; for (let x = -8; x <= 8; x += 0.2) pts.push([X(x), Y(clamp(arcAt(x, rr, vsp).aoa, -10, 10))]);
         line(ctx, pts, 'rgba(74,168,255,0.35)', 1.2, [4, 3]);
       }
-      label(ctx, 'dashed: radius 38" (steeper) and 62"', box[0] + box[2] - 4, box[1] + 8, COL.muted, 'right', false);
       return readout([
         ['Low point ÷ radius', `${fmtSigned(lp)} ÷ ${R} in → ${Math.abs(around).toFixed(1)}° around the arc`],
         ['× sin(plane)', `× sin ${vsp}° = ${Math.sin(th).toFixed(2)}`],
@@ -1837,6 +1863,7 @@ const WIDGETS = {
       const shift = 1 / Math.tan(th);
       // comparison bars
       const bx0 = 18, by0 = 36;
+      ctx.save(); unmirror(ctx, bx0, 240);
       label(ctx, `Path change for AoA ${fmtSigned(v.aoa)}°`, bx0, by0, COL.text, 'left', false);
       [['This plane', v.vsp, COL.plane], ['Driver ~47°', 47, COL.muted], ['Wedge ~64°', 64, COL.muted]].forEach(([n, p, c], i) => {
         const val = -v.aoa / Math.tan(p * D2R), y = by0 + 22 + i * 24;
@@ -1845,6 +1872,7 @@ const WIDGETS = {
         ctx.fillStyle = c; ctx.fillRect(Math.min(zx, zx + val * 14), y - 6, Math.abs(val * 14), 12);
         label(ctx, fmtSigned(val) + '°', zx + (val >= 0 ? val * 14 + 6 : 6), y, COL.text, 'left', false);
       });
+      ctx.restore();
       return readout([['Path change per 1° AoA', `${shift.toFixed(2)}°`], ['With this AoA', fmtSigned(-v.aoa * shift) + '°'], ['Direction', v.aoa < 0 ? 'down → path moves right' : v.aoa > 0 ? 'up → path moves left' : 'level']]);
     },
   },
@@ -1967,12 +1995,14 @@ const WIDGETS = {
       const bars = [['Launch', m.vla, T.launch, 0, v.club === 'driver' ? 24 : 40, '°'], ['Spin', m.spin, T.spin, 0, v.club === 'driver' ? 5000 : 12000, ' rpm']];
       bars.forEach(([n, val, win, lo, hi, u], i) => {
         const x0 = lw + 40, bw = w - x0 - 30, y = 60 + i * 80, X = x => x0 + (x - lo) / (hi - lo) * bw;
+        ctx.save(); unmirror(ctx, x0, bw);   // gauges read low to high, left to right
         label(ctx, n, x0, y - 18, COL.text, 'left', false);
         ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x0, y, bw, 14);
         ctx.fillStyle = 'rgba(95,211,154,0.25)'; ctx.fillRect(X(win[0]), y, X(win[1]) - X(win[0]), 14);
         const vx = X(clamp(val, lo, hi)); line(ctx, [[vx, y - 4], [vx, y + 18]], COL.text, 2.5);
         label(ctx, (u === '°' ? val.toFixed(1) : Math.round(val).toLocaleString()) + u, vx, y + 30, COL.text, 'center', false);
         label(ctx, `tour window ${win[0].toLocaleString()}–${win[1].toLocaleString()}${u}`, x0 + bw, y - 16, COL.muted, 'right', false);
+        ctx.restore();
       });
       return readout([['Dynamic loft', dl.toFixed(1) + '°'], ['Spin loft', m.spinLoft.toFixed(1) + '°'], ['Launch', m.vla.toFixed(1) + '°'], ['Spin', Math.round(m.spin).toLocaleString() + ' rpm'], ['Carry', (m.flight.carry / YD).toFixed(0) + ' yd']]);
     },
@@ -2127,7 +2157,7 @@ const WIDGETS = {
         ['Hands at impact', `${fmtSigned(r.handX)} in`],
         ['Lead shoulder at impact', `${fmtSigned(r.shoulderX)} in`],
         ['Shaft lean', `${fmtSigned(r.lean)}°`, r.lean < 0 ? 'bad' : ''],
-        ['Hinge left at impact', `${Math.round(r.lag)}°`],
+        ['Hinge remaining at impact', `${Math.round(r.lag)}°`],
         ['Attack angle', `${fmtSigned(r.aoa)}°`],
         ['Dynamic loft', `${r.dl.toFixed(1)}°`],
         ['Strike', STRIKE_NAME[r.kind] + (r.kind === 'fat' ? ` (${r.early.toFixed(1)} in before ball)` : r.lift > 0.05 ? ` (lifted ${r.lift.toFixed(1)} in)` : ''), good ? 'good' : 'bad'],
@@ -2138,7 +2168,7 @@ const WIDGETS = {
 
   // Driver carry map: launch x spin heatmap
   window: {
-    h: 360, hover: true,
+    h: 360, hover: true, flat: true,
     controls: [
       { key: 'speed', label: 'Club speed', min: 75, max: 125, step: 1, init: 100, unit: ' mph', dec: 0 },
       { key: 'launch', label: 'Your launch', min: 6, max: 24, step: 0.1, init: 10, unit: '°' },
@@ -2282,11 +2312,11 @@ const TOPICS = [
       <li><b>Wrist hinge at the top</b> matters less than when you release it. Starting with more hinge adds a little lean only if you hold it.</li>
     </ul>
     <h2>Is shaft lean automatic?</h2>
-    <p>Mostly, yes. When the shoulder shift gets the swing center ahead of the ball and some hinge is still left at impact, the hands arrive ahead of the clubhead and the shaft leans forward with no extra effort. In the tour preset the lead shoulder is about 2 in ahead of the ball and the hands about 5 in ahead, with about 17° of hinge left. That gives about 10° of lean and 22° of dynamic loft on a 32° 7 iron.</p>
+    <p>Mostly, yes. When the shoulder shift gets the swing center ahead of the ball and some hinge still remains at impact, the hands arrive ahead of the clubhead and the shaft leans forward with no extra effort. In the tour preset the lead shoulder is about 2 in ahead of the ball and the hands about 5 in ahead, with about 17° of hinge remaining. That gives about 10° of lean and 22° of dynamic loft on a 32° 7 iron.</p>
     <p>Both pieces matter. Press <b>Hang back</b>: the release is unchanged, but with no shift the shoulder stays 2 in behind the ball. Lean drops to about 5°, the low point moves to just ahead of the ball, and the club takes about 3 in of turf first.</p>
     <h2>What scooping does</h2>
     <p>Scooping (flipping) means the clubhead passes the hands before impact. In the <b>Scoop</b> preset the low point moves from 4.4 in ahead to just behind the ball, the shaft leans about 3° backward, and the 7 iron arrives with about 35° of loft instead of 22°. With the same posture the club reaches the turf almost 6 in early: fat. A scooper who learns to avoid the ground does it by lifting, which saves the contact and keeps the extra loft: high, weak, spinny shots, and thin ones when the lift overshoots.</p>
-    <div class="callout"><b>Try it:</b> press Play on the tour preset, then on Scoop, and watch the wrist-hinge readout in the top-left. In the tour swing about 17° of hinge is left at impact. In the scoop it is gone before the ball and goes negative as the clubhead passes the hands. Then move the release slider 3 in either way from the tour value: one side is fat and the other thin, which is how small the clean window is.</div>
+    <div class="callout"><b>Try it:</b> press Play on the tour preset, then on Scoop, and watch the wrist-hinge readout in the top-left. In the tour swing about 17° of hinge remains at impact. In the scoop it is gone before the ball and goes negative as the clubhead passes the hands. Then move the release slider 3 in either way from the tour value: one side is fat and the other thin, which is how small the clean window is.</div>
     <p class="hint">Simplified model: one flat plane, a straight lead arm, and a smooth release curve. Real swings add forearm rotation and the trail arm, so treat the numbers as directions and sizes.</p>` },
   { id: 'window', title: 'Launch & spin window', sub: 'Optimizing driver carry for your speed', html: `
     <h1>Launch & spin window</h1>
@@ -2295,7 +2325,7 @@ const TOPICS = [
     <ul>
       <li>The bright region shows the trade-off: <b>higher launch needs less spin</b>, and lower launch needs more spin to stay in the air.</li>
       <li>At <b>slower speeds</b> the window moves to higher launch and more spin, because the ball needs lift to stay up.</li>
-      <li>Most amateurs sit low-launch and high-spin (bottom right). The fix is usually hitting up more (see Attack angle), not a new driver.</li>
+      <li>Most amateurs sit low-launch and high-spin (<span data-nolr>bottom right</span>). The fix is usually hitting up more (see Attack angle), not a new driver.</li>
     </ul>
     <p class="hint">Carry only, with launch and spin set independently. Real delivery couples them (more loft adds both), and firm ground favors a little less spin for rollout.</p>` },
 ];
@@ -2501,7 +2531,8 @@ function s3DrawFP() {
   if (s3CmpRes) cop(s3CmpRes, 'rgba(180,140,255,0.7)', 1.5, S3T.end);
   cop(r, 'rgba(255,212,92,0.25)', 1.2, S3T.end); cop(r, COL.start, 2, t);
   const cp = X(f.cop); dot2(ctx, cp, 5.5, COL.panel); dot2(ctx, cp, 4, COL.start);
-  // lead share over time
+  // lead share over time (a time chart: reads left to right in both modes)
+  ctx.save(); if (isMirrored(ctx)) { ctx.translate(w, 0); ctx.scale(-1, 1); }
   const y0 = cy + 78, ch = h - y0 - 16, tx = q => 10 + q / S3T.end * (w - 20), ty = v => y0 + ch - v * ch;
   line(ctx, [[10, ty(0.5)], [w - 10, ty(0.5)]], 'rgba(255,255,255,0.12)', 1, [3, 3]);
   if (s3CmpRes) line(ctx, s3CmpRes.force.map(q => [tx(q.t), ty(q.wL)]), 'rgba(180,140,255,0.7)', 1.5);
@@ -2509,6 +2540,7 @@ function s3DrawFP() {
   for (const [tt, nm] of [[S3T.top, 'top'], [r.m.tImp, 'impact']]) { line(ctx, [[tx(tt), y0], [tx(tt), y0 + ch]], 'rgba(255,255,255,0.18)', 1); ctx.fillStyle = COL.muted; ctx.textAlign = 'center'; ctx.font = '10px -apple-system,sans-serif'; ctx.fillText(nm, tx(tt), y0 + ch + 11); }
   line(ctx, [[tx(t), y0], [tx(t), y0 + ch]], COL.text, 1.5);
   ctx.fillStyle = COL.muted; ctx.textAlign = 'left'; ctx.fillText('% on lead foot', 10, y0 - 3);
+  ctx.restore();
 }
 // ---- 3D swing tab: controls, state, rendering ----
 const S3_GROUPS = [
@@ -2792,7 +2824,7 @@ function s3Init() {
   const cv = document.getElementById('c3s');
   let dr = null;
   cv.addEventListener('pointerdown', e => { dr = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });
-  cv.addEventListener('pointermove', e => { if (!dr) return; s3Cam.yaw += (e.clientX - dr[0]) * 0.008; s3Cam.pitch = clamp(s3Cam.pitch + (e.clientY - dr[1]) * 0.006, -0.05, 1.55); dr = [e.clientX, e.clientY]; s3Draw(); });
+  cv.addEventListener('pointermove', e => { if (!dr) return; s3Cam.yaw += (e.clientX - dr[0]) * 0.008 * (LEFTY ? -1 : 1); s3Cam.pitch = clamp(s3Cam.pitch + (e.clientY - dr[1]) * 0.006, -0.05, 1.55); dr = [e.clientX, e.clientY]; s3Draw(); });
   cv.addEventListener('pointerup', () => dr = null);
   cv.addEventListener('wheel', e => { e.preventDefault(); s3Cam.dist = clamp(s3Cam.dist * Math.exp(e.deltaY * 0.001), 1.2, 12); s3Draw(); }, { passive: false });
   document.querySelectorAll('[data-s3cam]').forEach(btn => btn.onclick = () => { const [y, p, d] = S3_CAMS[btn.dataset.s3cam]; s3Cam.yaw = y * D2R; s3Cam.pitch = p * D2R; s3Cam.dist = d; s3Draw(); });
@@ -3002,8 +3034,10 @@ const AZ_MP = {
   wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
   model: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
 };
-// right-handed golfer: the lead side is the body's left
-const AZ_LM = { nose: 0, earL: 7, earR: 8, shL: 11, shT: 12, elL: 13, elT: 14, wrL: 15, wrT: 16, hipL: 23, hipT: 24, knL: 25, knT: 26, anL: 27, anT: 28 };
+// lead side is the body's left for a right-handed golfer (MediaPipe 11 = left shoulder); swapped for a left-hander
+const AZ_LM_R = { nose: 0, earL: 7, earR: 8, shL: 11, shT: 12, elL: 13, elT: 14, wrL: 15, wrT: 16, hipL: 23, hipT: 24, knL: 25, knT: 26, anL: 27, anT: 28 };
+const AZ_LM_L = { nose: 0, earL: 8, earR: 7, shL: 12, shT: 11, elL: 14, elT: 13, wrL: 16, wrT: 15, hipL: 24, hipT: 23, knL: 26, knT: 25, anL: 28, anT: 27 };
+const AZ_LM = { ...AZ_LM_R };
 const AZ_BONES = [['shL', 'shT'], ['shL', 'elL'], ['elL', 'wrL'], ['shT', 'elT'], ['elT', 'wrT'], ['shL', 'hipL'], ['shT', 'hipT'], ['hipL', 'hipT'], ['hipL', 'knL'], ['knL', 'anL'], ['hipT', 'knT'], ['knT', 'anT']];
 let azPoseLM = null, azPoseBusy = false, azPoseCancel = false;
 async function azGetLandmarker() {
@@ -3420,6 +3454,33 @@ function azInit() {
   window.addEventListener('resize', () => !document.getElementById('tabAz').hidden && azDraw());
   az.started = true; azSyncSide(); azLayout();
 }
+
+// ---- handedness toggle ----
+// Page text is written for a right-hander; in left-handed mode every left/right word is swapped, including text rendered later.
+const lrOk = n => { const el = n.parentElement; return !!el && !el.closest('script,style,[data-nolr]'); };
+function lrText(root, out) {   // text nodes under root that hold page text
+  if (root.nodeType === 3) { if (lrOk(root)) out.add(root); return out; }
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n; (n = tw.nextNode());) if (lrOk(n)) out.add(n);
+  return out;
+}
+const lrSwap = nodes => nodes.forEach(n => { const t = swapLR(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; });
+const lrWalk = root => lrSwap(lrText(root, new Set()));
+// new content arrives right-handed; swap each new text node once (nested inserts can show up in several records)
+new MutationObserver(ms => { if (!LEFTY) return; const s = new Set();
+  for (const m of ms) for (const n of m.addedNodes) if (n.isConnected) lrText(n, s);
+  lrSwap(s); }).observe(document.body, { childList: true, subtree: true });
+function setHand(lefty) {
+  if (lefty === LEFTY) return;
+  LEFTY = lefty; lrWalk(document.body);
+  Object.assign(AZ_LM, lefty ? AZ_LM_L : AZ_LM_R);
+  document.querySelectorAll('#hand [data-hand]').forEach(b => b.classList.toggle('on', (b.dataset.hand === 'L') === lefty));
+  try { localStorage.setItem('golfHand', lefty ? 'L' : 'R'); } catch (e) {}
+  const cur = document.querySelector('.tabs button.on'); showTab(cur ? cur.dataset.tab : 'model');
+  learnDraws.forEach(d => d());
+}
+document.querySelectorAll('#hand [data-hand]').forEach(b => b.onclick = () => setHand(b.dataset.hand === 'L'));
+try { if (localStorage.getItem('golfHand') === 'L') setHand(true); } catch (e) {}
 </script>
 </body>
 </html>

@@ -15,4 +15,4 @@ Interactive golf swing physics in a single HTML file: club delivery, ball flight
 
 Open `swing-model.html` in a browser, or serve the folder (`python3 -m http.server`) and visit `/swing-model.html`. No build step or dependencies.
 
-Models a right-handed golfer.
+Right- or left-handed golfer: use the toggle in the header.
