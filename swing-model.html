@@ -1839,6 +1839,88 @@ const WIDGETS = {
   },
 
   // Down-the-line view of the swing plane
+  // 3D swing plane as a hoop: tilt, swing direction and low point, with the ball fixed at the origin (inches)
+  hoop: {
+    h: 400,
+    controls: [
+      { key: 'vsp', label: 'Swing plane (tilt)', min: 40, max: 75, step: 0.5, init: 60, unit: '°' },
+      { key: 'hsp', label: 'Swing direction', min: -8, max: 8, step: 0.1, init: 0, unit: '°', signed: true },
+      { key: 'lp', label: 'Low point vs ball', min: -6, max: 8, step: 0.1, init: 4, unit: ' in', signed: true },
+      { key: 'R', label: 'Swing radius', min: 38, max: 62, step: 0.5, init: 49, unit: ' in' },
+    ],
+    caption: 'Drag to orbit. The ball stays put; the hoop moves around it. Purple dashed = swing direction (where the bottom of the hoop points), blue arrow = club path at the ball, red = low point. True scale.',
+    mount({ el, vals, draw }) {
+      const CAMS = { dtl: [180, 6, 200], fo: [90, 4, 200], top: [180, 88, 230], iso: [130, 22, 205] };
+      vals._cam = { yaw: 130 * D2R, pitch: 22 * D2R, dist: 205, target: V(4, 30, -16) };
+      const bar = document.createElement('div'); bar.className = 'wbtns';
+      bar.innerHTML = `<button data-c="dtl">Down the line</button><button data-c="fo">Face on</button><button data-c="top">Overhead</button><button data-c="iso">3/4</button><span class="sep"></span><span>Try:</span>
+        <button data-p="iron">7 iron</button><button data-p="driver">Driver</button><button data-p="dsq">Driver, zero path</button>`;
+      el.insertBefore(bar, el.querySelector('.wctl'));
+      const P = { iron: { vsp: 60, hsp: 0, lp: 4, R: 49 }, driver: { vsp: 47, hsp: 0, lp: -4, R: 57 }, dsq: { vsp: 47, hsp: 2.7, lp: -4, R: 57 } };
+      bar.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { const [y, p, d] = CAMS[b.dataset.c]; Object.assign(vals._cam, { yaw: y * D2R, pitch: p * D2R, dist: d }); draw(); });
+      bar.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+        for (const [k, val] of Object.entries(P[b.dataset.p])) { vals[k] = val; const inp = [...el.querySelectorAll('.wctl input')][['vsp', 'hsp', 'lp', 'R'].indexOf(k)]; inp.value = val; inp.dispatchEvent(new Event('input')); } });
+      const cv = el.querySelector('canvas'); cv.style.cursor = 'grab'; cv.style.touchAction = 'none'; let dr = null;
+      cv.addEventListener('pointerdown', e => { dr = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });
+      cv.addEventListener('pointermove', e => { if (!dr) return; const c = vals._cam;
+        c.yaw += (e.clientX - dr[0]) * 0.008 * (LEFTY ? -1 : 1); c.pitch = clamp(c.pitch + (e.clientY - dr[1]) * 0.006, -0.05, 1.55); dr = [e.clientX, e.clientY]; draw(); });
+      cv.addEventListener('pointerup', () => dr = null);
+      cv.addEventListener('wheel', e => { e.preventDefault(); vals._cam.dist = clamp(vals._cam.dist * Math.exp(e.deltaY * 0.001), 80, 500); draw(); }, { passive: false });
+    },
+    draw(ctx, w, h, v) {
+      const pr = makeProj(w, h, v._cam), S = p => pr(p);
+      const th = v.vsp * D2R, hr = v.hsp * D2R, R = v.R;
+      const d = V(Math.cos(hr), 0, Math.sin(hr));                     // swing direction (horizontal), + = right of target
+      const g = V(Math.sin(hr), 0, -Math.cos(hr));                    // horizontal, toward the golfer
+      const u = add(mul(g, Math.cos(th)), V(0, Math.sin(th), 0));     // up the plane
+      const phiB = -Math.asin(clamp(v.lp / R, -0.95, 0.95));          // where the ball sits on the hoop (0 = bottom)
+      const L = mul(add(mul(d, R * Math.sin(phiB)), mul(u, R * (1 - Math.cos(phiB)))), -1);   // low point; the hoop passes through the ball
+      const at = phi => add(L, add(mul(d, R * Math.sin(phi)), mul(u, R * (1 - Math.cos(phi)))));
+      const C = add(L, mul(u, R));
+      // ground grid, 1 ft squares
+      for (let i = -5; i <= 5; i++) line(ctx, [S(V(i * 12, 0, -60)), S(V(i * 12, 0, 36))], 'rgba(255,255,255,0.06)', 1);
+      for (let i = -5; i <= 3; i++) line(ctx, [S(V(-60, 0, i * 12)), S(V(60, 0, i * 12))], 'rgba(255,255,255,0.06)', 1);
+      // target line through the ball
+      line(ctx, [S(V(-70, 0, 0)), S(V(75, 0, 0))], 'rgba(244,246,245,0.55)', 1.5);
+      const tl = S(V(75, 0, 0)); if (tl) label(ctx, 'target →', tl[0], tl[1] - 12, COL.muted, 'center', false);
+      const gs = S(V(0, 0, -52)); if (gs) label(ctx, 'golfer', gs[0], gs[1] + 12, COL.muted, 'center', false);
+      // plane disc and hoop
+      const ring = []; for (let i = 0; i <= 180; i++) ring.push(at(i / 180 * 2 * Math.PI));
+      const rs = ring.map(S);
+      if (rs.every(Boolean)) { ctx.save(); ctx.fillStyle = 'rgba(180,140,255,0.09)'; ctx.beginPath(); rs.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); ctx.restore(); }
+      for (let i = 0; i < 180; i++) { const a = ring[i], b = ring[i + 1], under = a.y < 0 && b.y < 0;
+        line(ctx, [rs[i], rs[i + 1]], under ? 'rgba(95,211,154,0.5)' : COL.accent, 2.5, under ? [3, 3] : null); }
+      // radius from the hoop centre to the low point
+      line(ctx, [S(C), S(L)], 'rgba(228,235,231,0.25)', 1, [4, 4]);
+      // swing direction: the bottom of the hoop, extended
+      line(ctx, [S(add(L, mul(d, -65))), S(add(L, mul(d, 70)))], COL.plane, 1.8, [7, 5]);
+      // plane tilt: angle between the ground (toward the golfer) and the plane, at the low point
+      const arcP = []; for (let i = 0; i <= 24; i++) { const a = th * i / 24; arcP.push(S(add(L, add(mul(g, 24 * Math.cos(a)), V(0, 24 * Math.sin(a), 0))))); }
+      line(ctx, [S(L), S(add(L, mul(g, 30)))], 'rgba(228,235,231,0.4)', 1, [3, 3]);
+      line(ctx, [S(L), S(add(L, mul(u, 30)))], 'rgba(180,140,255,0.7)', 1.2);
+      line(ctx, arcP, COL.plane, 1.5);
+      const am = S(add(L, add(mul(g, 33 * Math.cos(th / 2)), V(0, 33 * Math.sin(th / 2), 0)))); if (am) label(ctx, `plane ${v.vsp.toFixed(1)}°`, am[0], am[1], COL.plane, 'center');
+      // swing direction angle on the ground, from the target line
+      if (Math.abs(v.hsp) >= 0.3) { const pts = []; for (let i = 0; i <= 16; i++) { const a = hr * i / 16; pts.push(S(add(L, V(60 * Math.cos(a), 0, 60 * Math.sin(a))))); }
+        line(ctx, [S(L), S(add(L, V(70, 0, 0)))], 'rgba(244,246,245,0.3)', 1, [3, 3]); line(ctx, pts, COL.plane, 1.5); }
+      // club path at the ball: the hoop's direction there
+      const T = add(mul(d, Math.cos(phiB)), mul(u, Math.sin(phiB))), Th = norm(V(T.x, 0, T.z));
+      const path = Math.atan2(T.z, T.x) * R2D, aoa = Math.asin(clamp(T.y, -1, 1)) * R2D;
+      const pa = S(mul(Th, -14)), pb = S(mul(Th, 36)); if (pa && pb) arrow(ctx, pa, pb, COL.path, 2.5, 9);
+      // low point (and its shadow on the ground)
+      const Ls = S(L);
+      if (Ls) { dot2(ctx, Ls, 6, COL.panel); dot2(ctx, Ls, 4.5, COL.low); label(ctx, `low point ${fmtSigned(v.lp)} in`, Ls[0], Ls[1] + 20, COL.low, 'center'); }
+      // ball, drawn at least a few pixels across
+      const bc = S(V(0, 0.84, 0));
+      if (bc) { const r = Math.max(4, 0.84 * pr.f / bc[2]); ctx.save(); ctx.fillStyle = '#f4f6f5'; ctx.strokeStyle = '#0e1311'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(bc[0], bc[1], r, 0, 7); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      if (pb) label(ctx, `path ${fmtSigned(path)}°`, pb[0] + 8, pb[1], COL.path, 'left');
+      const dl = S(add(L, mul(d, -65))); if (dl) label(ctx, `swing direction ${fmtSigned(v.hsp)}°`, dl[0], dl[1] + 14, COL.plane, 'center');
+      const diff = path - v.hsp;
+      return readout([['Attack angle', fmtSigned(aoa) + '°'], ['Club path', fmtSigned(path) + '°', Math.abs(path) < 0.5 ? 'good' : ''],
+        ['Path − swing direction', fmtSigned(diff) + '°'], ['Ball on the hoop', `${Math.abs(phiB * R2D).toFixed(1)}° ${v.lp >= 0 ? 'before' : 'after'} the bottom`]]);
+    },
+  },
+
   plane: {
     h: 280,
     controls: [
@@ -2272,6 +2354,9 @@ const TOPICS = [
     <p class="lede">Picture the clubhead travelling around a tilted circle. The <b>vertical swing plane</b> is how steeply that circle is tilted. The <b>horizontal swing plane</b> (swing direction) is where its bottom edge points relative to the target.</p>
     <div data-widget="plane"></div>
     <p>Longer clubs sit on flatter planes (driver about 45–50°, wedges about 60–65°). Swing direction is where the arc as a whole points. <b>Club path</b> is the club's direction at the instant of impact, which only matches swing direction if you strike exactly at the low point.</p>
+    <h2>The hoop in 3D</h2>
+    <p>Here is the whole circle. Tilt it with the plane, point it with the swing direction, and slide it with the low point. The ball never moves. When the low point is ahead of the ball, the club meets the ball while still coming down and out toward it, so the path points right of the swing direction. Put the low point behind the ball (a driver off a tee) and the path points left of it. <b>Driver, zero path</b> shows the fix: aim the swing direction right until the path is square.</p>
+    <div data-widget="hoop"></div>
     <p>That's why a driver (flat plane, hit on the upswing) and an iron (steeper plane, hit on the downswing) need <b>different swing directions</b> to produce a zero path. Irons need the swing aimed slightly left; drivers slightly right.</p>` },
   { id: 'dplane', title: 'Path, face & the D-plane', sub: 'Why the ball starts and curves where it does', html: `
     <h1>Path, face & the D-plane</h1>
