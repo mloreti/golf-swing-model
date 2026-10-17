@@ -135,7 +135,6 @@ input[type=number]{width:100%;background:var(--panel2);color:var(--text);border:
 input[type=number]::placeholder{color:#56645e}
 .ex{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)}
 .ex button{padding:4px 8px;font-size:12px}
-main.diag{display:flex;flex-direction:column;gap:14px}
 .sumbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .m4{grid-template-columns:repeat(4,1fr)}
 table.tgt{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
@@ -191,7 +190,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <body>
 <header>
   <h1>Golf Swing Model</h1>
-  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button><button data-tab="opt">Optimizer</button></nav>
+  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button><button data-tab="opt">Optimizer</button></nav>
   <div class="hand" id="hand" data-nolr><button data-hand="R" class="on">Right-handed</button><button data-hand="L">Left-handed</button></div>
 </header>
 
@@ -369,49 +368,6 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
       <h2>Measurements</h2>
       <div id="azTable"></div>
       <p class="hint" style="margin:6px 0 0">Keys: ← → step a frame (Shift: 10 frames) · Space play/pause · Delete removes the selected drawing · Esc cancels.</p>
-    </div>
-  </main>
-</div>
-
-<div class="app" id="tabDiag" hidden>
-  <aside>
-    <div class="card">
-      <h2>Your numbers</h2>
-      <p class="hint">Fill in what you know; leave the rest blank. Launch-monitor numbers work best, but estimates still help.</p>
-      <div class="ctrl"><div class="row"><span>Club</span></div><select id="dClub"></select></div>
-      <div id="dNums"></div>
-      <div class="ctrl"><div class="row"><span>Divot location</span></div><select id="dDivotLoc">
-        <option value="">Unknown</option><option value="none">No divot / bruised grass</option><option value="before">Starts before the ball</option><option value="at">Starts at the ball</option><option value="after">Starts after the ball (target side)</option></select></div>
-      <div class="ctrl"><div class="row"><span>Divot depth</span></div><select id="dDivotDepth">
-        <option value="">Unknown</option><option value="shallow">Shallow (bacon strip)</option><option value="medium">Medium (dollar bill)</option><option value="deep">Deep (thick chunk)</option></select></div>
-      <div class="ctrl"><div class="row"><span>Divot direction</span></div><select id="dDivotDir">
-        <option value="">Unknown</option><option value="left">Points left of target</option><option value="straight">Points at target</option><option value="right">Points right of target</option></select></div>
-      <div class="ctrl"><div class="row"><span>Strike location on face</span></div><select id="dStrike">
-        <option value="">Unknown</option><option value="center">Center</option><option value="toe">Toe</option><option value="heel">Heel</option><option value="high">High on face</option><option value="low">Low on face</option></select></div>
-      <div class="ctrl"><div class="row"><span>Typical miss</span></div><select id="dMiss">
-        <option value="">Unknown</option><option value="slice">Slice (big curve right)</option><option value="fade">Fade that won't stop</option><option value="hook">Hook (big curve left)</option><option value="push">Push (starts right, straight)</option><option value="pull">Pull (starts left, straight)</option><option value="fat">Fat (ground before ball)</option><option value="thin">Thin / skulled</option><option value="top">Topped</option><option value="weak">High and weak</option><option value="low">Too low</option></select></div>
-      <div class="ex">
-        <span>Examples:</span>
-        <button data-ex="slicer">Slicer</button><button data-ex="fatthin">Fat/thin irons</button><button data-ex="downdriver">Driver hitting down</button><button data-ex="hook">Hooker</button><button data-ex="tour">Tour 7i</button><button data-ex="clear">Clear</button>
-      </div>
-    </div>
-  </aside>
-  <main class="diag">
-    <div class="card">
-      <div class="sumbar">
-        <h2 style="margin:0">Summary</h2>
-        <button class="primary" id="dLoad">Load into model →</button>
-      </div>
-      <div class="metrics m4" id="dDerived"></div>
-    </div>
-    <div class="card">
-      <h2>Your numbers vs target window</h2>
-      <table class="tgt" id="dTable"></table>
-      <p class="hint" id="dTargetNote"></p>
-    </div>
-    <div class="card">
-      <h2>Likely faults &amp; fixes</h2>
-      <div id="dFaults"></div>
     </div>
   </main>
 </div>
@@ -1196,33 +1152,6 @@ window.addEventListener('resize', render);
 syncControls();
 render();
 
-// =====================================================================
-// Swing diagnosis: numbers in -> target comparison, likely faults, fixes
-// =====================================================================
-const DNUMS = [
-  ['speed', 'Club speed', 'mph', ''],
-  ['aoa', 'Attack angle', '°', '+ hitting up, − hitting down'],
-  ['launch', 'Launch angle', '°', 'Vertical launch'],
-  ['spin', 'Spin rate', 'rpm', ''],
-  ['path', 'Club path', '°', '+ in-to-out, − out-to-in'],
-  ['face', 'Face angle', '°', 'At impact, vs target. + open/right'],
-];
-const dNumsEl = document.getElementById('dNums');
-for (const [k, label, unit, help] of DNUMS) {
-  dNumsEl.insertAdjacentHTML('beforeend', `<div class="ctrl"><div class="row"><span>${label}</span><small style="margin:0">${unit}</small></div>
-    <input type="number" step="any" id="d_${k}" placeholder="unknown">${help ? `<small>${help}</small>` : ''}</div>`);
-}
-document.getElementById('dClub').innerHTML = Object.entries(CLUBS).map(([k, c]) => `<option value="${k}">${c.name}</option>`).join('');
-document.getElementById('dClub').value = '7i';
-const D_SELECTS = { club: 'dClub', divotLoc: 'dDivotLoc', divotDepth: 'dDivotDepth', divotDir: 'dDivotDir', strike: 'dStrike', miss: 'dMiss' };
-
-function readDiag() {
-  const inp = {};
-  for (const [k] of DNUMS) { const v = document.getElementById('d_' + k).value.trim(); inp[k] = v === '' || isNaN(+v) ? null : +v; }
-  for (const [k, id] of Object.entries(D_SELECTS)) inp[k] = document.getElementById(id).value;
-  return inp;
-}
-
 // Target windows: tour-calibrated, with driver launch/spin optimized by speed
 function targets(club, speed) {
   const v = speed ?? 95;
@@ -1244,315 +1173,9 @@ function targets(club, speed) {
   return { ...T, path: [-2.5, 3], face: [-2.5, 2.5], f2p: [-2, 2] };
 }
 
-function derive(inp) {
-  const c = CLUBS[inp.club], has = k => inp[k] !== null;
-  const d = {};
-  if (has('face') && has('path')) {
-    d.f2p = inp.face - inp.path;
-    d.start = inp.face + 0.2 * (inp.path - inp.face);    // ball starts mostly where the face points
-  }
-  if (has('aoa') && has('launch')) {
-    const kf = 0.85 - (c.refSL - 14) * 0.002;
-    d.dl = inp.aoa + (inp.launch - inp.aoa) / kf;          // invert launch ≈ AoA + kf·(DL − AoA)
-    d.spinLoft = Math.hypot(d.dl - inp.aoa, d.f2p ?? 0);
-    if (has('speed')) {
-      const smash = Math.min(1.52, c.smash * Math.cos(d.spinLoft * D2R) / Math.cos(c.refSL * D2R));
-      d.expSpin = inp.speed * smash * d.spinLoft * c.spinK;
-      d.ballSpeed = inp.speed * smash;
-    }
-  }
-  return d;
-}
-
-function shapeName(inp, d) {
-  if (d.f2p === undefined) return null;
-  const start = Math.abs(d.start) < 1.5 ? '' : d.start > 0 ? 'Push' : 'Pull';
-  const a = Math.abs(d.f2p);
-  const c = a < 1 ? '' : d.f2p > 0 ? (a > 4 ? 'slice' : 'fade') : (a > 4 ? 'hook' : 'draw');
-  if (!start && !c) return 'Straight';
-  if (!start) return c[0].toUpperCase() + c.slice(1);
-  return start + (c ? '-' + c : '');
-}
-
-function diagnose(inp, d) {
-  const faults = new Map();
-  const add = (key, sev, title, evidence, causes, fixes, drill) => {
-    const f = faults.get(key);
-    if (f) { f.sev = Math.max(f.sev, sev); f.evidence.push(evidence); return; }
-    faults.set(key, { sev, title, evidence: [evidence], causes, fixes, drill });
-  };
-  const has = k => inp[k] !== null, f1 = v => fmtSigned(v, 1);
-  const club = inp.club, wood = club === 'driver' || club === '3w', T = targets(club, inp.speed);
-  const miss = inp.miss;
-
-  // ---------- face / path: curvature ----------
-  const OTT = ['over-the-top', 3, 'Out-to-in path with an open face (slice pattern)', null,
-    ['Shoulders and arms start the downswing, throwing the club outside the hands', 'Weak grip or a cupped lead wrist at the top leaves the face open', 'Open shoulders at address, or ball too far forward'],
-    ['Start down with a bump of the lead hip toward the target while the back stays turned', 'Strengthen the grip: see 2–3 knuckles on the lead hand', 'Feel the trail elbow working in front of the trail hip in transition', 'Feel the lead wrist flat or slightly bowed at the top'],
-    'Headcover drill: set a headcover just outside and behind the ball. Swing without hitting it, which forces an inside approach.'];
-  const OPENFACE = ['open-face', 3, 'Face open to path', null,
-    ['Weak grip', 'Cupped lead wrist at the top / through impact', 'Not enough forearm rotation (holding the face off)'],
-    ['Strengthen the grip a little', 'Feel the lead-hand knuckles pointing at the ground through impact', 'Let the forearms rotate: toe of the club points up by waist-high in the follow-through'],
-    'Split-hands drill: hands 3 inches apart on the grip, hit half shots and feel the trail hand rotate over.'];
-  const INOUT = ['in-to-out-hook', 3, 'In-to-out path with a closed face (hook pattern)', null,
-    ['Body stalls through impact so the hands flip the face closed', 'Club gets "stuck" behind the body (too shallow / too much from the inside)', 'Strong grip or closed stance'],
-    ['Keep the chest rotating to face the target at the finish', 'Feel the hands swing more left after impact (for a right-hander)', 'Check the grip and stance; neutral if strong or closed'],
-    'Gate drill: two alignment sticks/tees just outside heel and toe. Swing through without touching the outer one; finish with hips and chest open.'];
-  const CLOSEDFACE = ['closed-face', 3, 'Face closed to path', null,
-    ['Strong grip', 'Flipping the hands at impact', 'Bowed lead wrist held too long into impact for this grip'],
-    ['Weaken the grip slightly', 'Keep rotating the body so the hands do not have to flip', 'Hold the finish with the clubface pointing more at the sky'],
-    'Hold-off drill: hit three-quarter shots holding the finish with the face pointing up at the sky.'];
-
-  if (d.f2p !== undefined) {
-    if (d.f2p > 2) {
-      const ev = `Face ${f1(d.f2p)}° open to path (path ${f1(inp.path)}°, face ${f1(inp.face)}°) → ball curves right`;
-      if (inp.path < -2) add(...withEv(OTT, ev, d.f2p > 4 ? 3 : 2)); else add(...withEv(OPENFACE, ev, d.f2p > 4 ? 3 : 2));
-    } else if (d.f2p < -2) {
-      const ev = `Face ${f1(-d.f2p)}° closed to path (path ${f1(inp.path)}°, face ${f1(inp.face)}°) → ball curves left`;
-      if (inp.path > 2) add(...withEv(INOUT, ev, d.f2p < -4 ? 3 : 2)); else add(...withEv(CLOSEDFACE, ev, d.f2p < -4 ? 3 : 2));
-    }
-  } else if (miss === 'slice' || miss === 'fade') add(...withEv(OTT, `Your typical miss is a ${miss}; that means the face is open to the path`, miss === 'slice' ? 3 : 2));
-  else if (miss === 'hook') add(...withEv(INOUT, 'Your typical miss is a hook; that means the face is closed to the path', 3));
-
-  // ---------- path extremes ----------
-  if (has('path') && inp.path < -4 && !faults.has('over-the-top'))
-    add('oot-path', 2, 'Strongly out-to-in path', `Path ${f1(inp.path)}° (target window ${T.path[0]} to +${T.path[1]}°)`,
-      ['Upper body starts the downswing', 'Shoulders open at address', 'Ball too far forward'],
-      ['Feel the downswing start from the ground up (lead hip first)', 'Check shoulder alignment at address with a club across the chest'],
-      'Step drill: feet together at the top, step toward the target with the lead foot to start the downswing.');
-  if (has('path') && inp.path > 5 && !faults.has('in-to-out-hook'))
-    add('io-path', 2, 'Excessively in-to-out path', `Path ${f1(inp.path)}° (target window up to +${T.path[1]}°)`,
-      ['Club drops too far behind (stuck)', 'Early extension (hips move toward the ball) blocks rotation', 'Ball too far back'],
-      ['Keep the hips back (butt toward the wall) through impact', 'Keep the chest turning through the ball', 'Move ball position forward slightly'],
-      'Wall drill: set up with your butt touching a wall and keep contact through impact on practice swings.');
-  if (club === 'driver' && has('aoa') && has('path') && inp.aoa < -1 && inp.path < -1)
-    add(faults.has('over-the-top') ? 'over-the-top' : 'oot-path', 1, 'Out-to-in path', `Hitting down (${f1(inp.aoa)}°) already moves the path about ${(Math.abs(inp.aoa) / Math.tan(47 * D2R)).toFixed(1)}° right of your swing direction, so the swing itself is aimed about ${f1(inp.path - Math.abs(inp.aoa) / Math.tan(47 * D2R))}° left. Hitting up without changing that would move the path further left, so pair the AoA fix with swinging more to the right`, [], [], null);
-
-  // ---------- start line (face) ----------
-  if (has('face') && Math.abs(inp.face) > 3 && (d.f2p === undefined || Math.abs(d.f2p) <= 2.5))
-    add('start-line', 2, inp.face > 0 ? 'Ball starting right (push)' : 'Ball starting left (pull)', `Face ${f1(inp.face)}° at impact; the ball starts mostly where the face points`,
-      ['Alignment: body or clubface aimed off line', 'Ball position (back = right, forward = left)', inp.face > 0 ? 'Body outraces the arms, so the face is late to square' : 'Upper body spins out early'],
-      ['Check alignment with a stick on the ground at the feet and one on the target line', 'Check ball position against a reference stick'],
-      'Two-stick station: one stick on the target line, one at the toes. Hit 10 balls checking that the start line matches the face.');
-  else if (d.f2p === undefined && (miss === 'push' || miss === 'pull'))
-    add('start-line', 2, miss === 'push' ? 'Ball starting right (push)' : 'Ball starting left (pull)', `Your typical miss is a ${miss}, so the face is aimed ${miss === 'push' ? 'right' : 'left'} at impact with path close to face`,
-      ['Alignment', 'Ball position', miss === 'push' ? 'Body outraces the arms' : 'Upper body spins out early'],
-      ['Check alignment and ball position with sticks'], null);
-
-  // ---------- divots & contact misses ----------
-  if (!wood || club === '3w') {
-    if (inp.divotLoc === 'before' || miss === 'fat')
-      add('low-point-back', 3, 'Low point behind the ball (fat contact)', inp.divotLoc === 'before' ? 'Divot starts before the ball' : 'Typical miss is fat',
-        ['Weight stays back / hanging on the trail side', 'Casting: releasing the angle early from the top', 'Ball too far forward', 'Swaying off the ball in the backswing'],
-        ['Shift pressure to the lead foot before the arms come down', 'Keep the wrist hinge longer; hands lead the clubhead into impact', 'Check ball position: center to slightly forward of center for mid irons'],
-        'Towel drill: lay a towel 4" behind the ball and hit without touching it.');
-    if (inp.divotLoc === 'none' && !wood) add('low-point-back', 2, 'Low point behind the ball (scooping)', 'No divot with irons: the club is level or rising at impact', [], [], null);
-    if (miss === 'thin' || miss === 'top')
-      add('thin', 2, miss === 'top' ? 'Topped shots: arc bottom too high or behind the ball' : 'Thin contact: arc bottom too high or behind the ball', `Typical miss is ${miss === 'top' ? 'topping' : 'thin'}`,
-        ['Standing up / early extension (losing posture)', 'Low point behind the ball, so the club is already rising', 'Arms pulling in (chicken wing)'],
-        ['Keep chest down and posture through impact', 'Pressure forward into the lead side', 'Extend arms through the ball'],
-        'Feet-together drill: half swings with feet together keep the body centered and the posture stable.');
-    // Depth alone is a style (diggers vs sweepers); it's only a fault alongside steepness/contact signs
-    if (inp.divotDepth === 'deep') {
-      const signs = [
-        has('aoa') && inp.aoa < T.aoa[0] - 1.5 && `steep AoA ${f1(inp.aoa)}°`,
-        (inp.divotLoc === 'before' || miss === 'fat') && 'fat contact',
-        inp.divotDir === 'left' && 'divot pointing left',
-      ].filter(Boolean);
-      if (signs.length)
-        add('steep', 2, 'Too steep into the ball', `Deep divots together with ${signs.join(', ')}`,
-          ['Over-the-top move steepens the shaft', 'Body dropping toward the ball in the downswing', 'Ball too far back'],
-          ['Shallow the shaft in transition (trail elbow in, club falls behind the hands)', 'Keep head height steady through impact', 'Move ball position forward a little'],
-          'Pump drill: pump halfway down twice, feeling the shaft lay flatter, then swing through.');
-      else
-        add('digger', inp.divotLoc === 'after' ? 0 : 1, 'Digger: deep divots', `Deep divots${inp.divotLoc === 'after' ? ' that start after the ball' : ''}, with no steep or fat signs`,
-          ['A style: downward strike with the low point well below the turf'],
-          ['Fine if the low point is consistent; contact location matters more than depth', 'Soft turf: more bounce or a wider sole helps the club exit', 'Occasional heavy shots? Shallow the AoA slightly for more room for error'], null);
-    }
-    if (inp.divotLoc === 'after' && inp.divotDepth !== 'deep' && !faults.has('low-point-back'))
-      add('good-low-point', 0, 'Low point is in front of the ball', 'Divot starts after the ball: ball then turf', [], [], null);
-    if (inp.divotDir === 'left' && (!has('path') || inp.path < -1))
-      add(faults.has('over-the-top') ? 'over-the-top' : 'oot-path', 2, 'Out-to-in path', 'Divot points left of the target', ['Upper body starts the downswing'], ['Lead hip starts the downswing; trail elbow in front of the trail hip'], null);
-    if (inp.divotDir === 'right' && (!has('path') || inp.path > 1))
-      add(faults.has('in-to-out-hook') ? 'in-to-out-hook' : 'io-path', 2, 'In-to-out path', 'Divot points right of the target', ['Club stuck behind the body'], ['Keep the chest turning through impact'], null);
-  }
-
-  // ---------- attack angle ----------
-  if (has('aoa')) {
-    if (club === 'driver' && inp.aoa < -1)
-      add('driver-down', inp.aoa < -3 ? 3 : 2, 'Hitting down on the driver', `AoA ${f1(inp.aoa)}° (optimal for distance is about +2 to +5°)`,
-        ['Ball too far back in the stance or teed too low', 'Upper body slides toward the target in the downswing', 'No spine tilt away from the target at address'],
-        ['Ball off the lead heel, teed so half the ball is above the crown', 'Tilt the spine away from the target at address and keep the head behind the ball', 'Feel like you swing up and out to right field'],
-        'Tee-in-front drill: place a second tee 4" in front of the ball. Clip the ball and miss the front tee, which teaches you to catch it on the upswing.');
-    else if (!wood && inp.aoa > -1)
-      add('low-point-back', inp.aoa > 1 ? 3 : 2, 'Low point behind the ball (scooping)', `Iron AoA ${f1(inp.aoa)}° (target ${T.aoa[0]} to ${T.aoa[1]}°): the arc bottoms out at or behind the ball`,
-        ['Weight stays on the trail foot through impact', 'Trying to lift the ball into the air (flip)', 'Early release / casting from the top'],
-        ['Get 70%+ pressure on the lead foot at impact', 'Hands ahead of the clubhead at impact (shaft leaning toward target)', 'Feel the chest over or ahead of the ball at impact'],
-        'Line drill: draw a line (or lay a towel) and strike so the divot starts on the target side of the line, 10 in a row.');
-    else if (!wood && inp.aoa < T.aoa[0] - 1.5)
-      add('steep', 2, 'Too steep into the ball', `AoA ${f1(inp.aoa)}° (target ${T.aoa[0]} to ${T.aoa[1]}°)`,
-        ['Over-the-top move steepens the shaft', 'Ball too far back', 'Too much lateral slide / reverse pivot'],
-        ['Shallow the shaft in transition (trail elbow in, club falls behind the hands)', 'Move ball position forward a little', 'Rotate more and slide less'],
-        'Pump drill: pump halfway down twice, feeling the shaft lay flatter, then swing through.');
-    else if (club === 'driver' && inp.aoa > 7)
-      add('driver-up', 1, 'Very steep upswing on the driver', `AoA ${f1(inp.aoa)}°: fine for distance, but contact gets inconsistent above +6°`,
-        ['Ball very far forward', 'Hanging back on the trail side'], ['Ball back a touch; keep pressure moving to the lead side'], null);
-  }
-
-  // ---------- launch & spin windows ----------
-  const lo = (k) => has(k) && inp[k] < T[k][0], hi = (k) => has(k) && inp[k] > T[k][1];
-  if (club === 'driver') {
-    if (hi('spin') && faults.has('driver-down'))
-      add('driver-down', 2, '', `Spin ${inp.spin} rpm is above the ${T.spin.join('–')} rpm window; hitting down raises spin loft${d.spinLoft ? ` (est. ${d.spinLoft.toFixed(1)}°)` : ''}`, [], [], null);
-    else if (hi('spin') && (hi('launch') || (d.dl && d.dl > 16)))
-      add('add-loft', 2, 'Too much spin loft: adding loft at impact', `Spin ${inp.spin} rpm and launch ${inp.launch ?? '?'}° (window ${T.spin.join('–')} rpm, ${T.launch.join('–')}°)`,
-        ['Flipping or scooping through impact', 'Hanging back with the hands passing the clubhead', 'Too much loft for your speed'],
-        ['Hit up (positive AoA) instead of adding loft', 'Feel the handle moving forward through impact', 'Try 1° less loft or a lower-spin head/shaft'],
-        'Tee height + hit up: tee higher, ball forward, and feel the club rising through the ball.');
-    else if (hi('spin'))
-      add('driver-spin', 2, 'Driver spin too high', `Spin ${inp.spin} rpm (window ${T.spin.join('–')} rpm${has('speed') ? ' for ' + inp.speed + ' mph' : ''})`,
-        ['Hitting down (negative AoA increases spin loft)', 'Low-on-face strikes (gear effect adds spin)', 'Glancing blow: big face-to-path difference'],
-        ['Hit up on it: ball forward and tee higher', 'Strike slightly above center (foot spray on the face to check)', 'If delivery is good: try a low-spin head or ball'],
-        'Foot-spray check: spray the face, hit 5 balls, and aim for impact marks slightly high and in the center.');
-    if (lo('spin'))
-      add('driver-lowspin', inp.spin < T.spin[0] - 400 ? 2 : 1, 'Driver spin too low', `Spin ${inp.spin} rpm (window ${T.spin.join('–')} rpm). Very low spin is unstable and drops out of the sky`,
-        ['High-toe strikes (gear effect lowers spin)', 'Too little loft / LS head for your speed'],
-        ['Add loft (adjustable hosel)', 'Center the strike', 'Try a higher-spin head or ball'], null);
-    if (lo('launch') && !faults.has('driver-down'))
-      add('driver-lowlaunch', 2, 'Driver launch too low', `Launch ${inp.launch}° (window ${T.launch.join('–')}°)`,
-        ['Hitting down or delofting at impact', 'Ball too far back / tee too low', 'Too little loft'],
-        ['Tee higher, ball forward, hit up', 'Add 1–2° of loft'], null);
-    if (has('speed') && inp.speed < 85)
-      add('slow', 1, 'Lower club speed: optimize launch rather than force speed', `${inp.speed} mph`, ['Speed is limited by sequencing and physical capacity'],
-        ['Higher-lofted driver (10.5–12°), lighter shaft', 'Launch 14–17° with spin 2,300–3,000 rpm maximizes carry at this speed', 'Speed training (overspeed sticks) 3×/week'], null);
-  } else {
-    if (hi('launch') && hi('spin'))
-      add('add-loft', 2, 'Adding loft at impact (flip / scoop)', `Launch ${inp.launch}° and spin ${inp.spin} rpm both above the ${CLUBS[club].name} window (${T.launch.join('–')}°, ${T.spin.join('–')} rpm)`,
-        ['Hands behind the clubhead at impact', 'Weight back, trying to help the ball up'],
-        ['Forward shaft lean: hands over the lead thigh at impact', 'Pressure into the lead side earlier'],
-        'Impact bag / hold-the-angle drill: hit punch shots holding the hands ahead with a flat lead wrist at the finish.');
-    else if (lo('launch') && lo('spin'))
-      add('deloft', 2, 'Low launch and low spin: delofting or thin strikes', `Launch ${inp.launch}°, spin ${inp.spin} rpm (window ${T.launch.join('–')}°, ${T.spin.join('–')} rpm)`,
-        ['Contact low on the face (thin)', 'Too much shaft lean / ball too far back', 'Strong-lofted equipment'],
-        ['Check ball position (mid irons: center to 1 ball forward)', 'Check strike height with face spray'], null);
-    else if (lo('launch'))
-      add('lowlaunch', 1, 'Launch low for this club', `Launch ${inp.launch}° (window ${T.launch.join('–')}°)`, ['Excess shaft lean or ball back'], ['Ball position slightly forward'], null);
-    else if (hi('launch'))
-      add('highlaunch', 1, 'Launch high for this club', `Launch ${inp.launch}° (window ${T.launch.join('–')}°)`, ['Adding loft / ball forward'], ['Hands slightly more forward at impact'], null);
-    if (lo('spin') && !(lo('launch')))
-      add('lowspin', 1, 'Spin low for this club', `Spin ${inp.spin} rpm (window ${T.spin.join('–')} rpm)`,
-        ['Contact low on the face or toe', 'Grass between face and ball (flier lie)', 'Distance/ionomer ball or worn grooves'],
-        ['Check strike location', 'For scoring clubs, a urethane ball adds spin and stopping power'], null);
-    if (hi('spin') && !hi('launch'))
-      add('highspin', 1, 'Spin high for this club', `Spin ${inp.spin} rpm (window ${T.spin.join('–')} rpm)`,
-        ['Steep AoA with high dynamic loft (large spin loft)', 'Glancing blow (big face-to-path)'], ['Shallow the AoA slightly', 'Square the face to the path'], null);
-    if (miss === 'weak') add('add-loft', 2, 'Adding loft at impact (flip / scoop)', 'Typical miss is high and weak', ['Hands behind at impact'], ['Forward shaft lean'], null);
-  }
-  if (miss === 'low' && wood) add('driver-down', 2, 'Hitting down on the driver', 'Typical miss is too low', [], [], null);
-
-  // ---------- spin vs delivery mismatch (strike location tells) ----------
-  if (d.expSpin && has('spin')) {
-    const r = inp.spin / d.expSpin;
-    if (r < 0.8) add('strike-spin', 1, 'Spin lower than your delivery predicts', `Measured ${inp.spin} rpm vs about ${Math.round(d.expSpin / 50) * 50} rpm expected from the spin loft`,
-      ['High or toe strikes (gear effect)', 'Flier lie / wet grass', 'Distance ball or worn grooves'], ['Check strike location'], null);
-    if (r > 1.25) add('strike-spin', 1, 'Spin higher than your delivery predicts', `Measured ${inp.spin} rpm vs about ${Math.round(d.expSpin / 50) * 50} rpm expected from the spin loft`,
-      ['Low-on-face or heel strikes', 'Glancing blow'], ['Check strike location; tee height for woods'], null);
-  }
-
-  // ---------- strike location ----------
-  const STR = {
-    toe:  ['Toe strikes', ['Standing too far from the ball', 'Arms pulling in through impact (chicken wing)', 'Sliding the hips away instead of rotating'], ['Set up a touch closer', 'Extend the arms through impact', wood ? 'Toe hits produce draw spin (gear effect); fixing the strike may expose a fade' : 'Toe hits lose speed and start right'], 'Two-tee gate: tees just outside heel and toe; strike between them.'],
-    heel: ['Heel strikes', ['Early extension: hips move toward the ball', 'Standing too close', 'Out-to-in path throws the club outward'], ['Keep hips back through impact', 'Set up slightly farther away'], 'Wall drill: butt touching a wall at address, stay in contact through impact.'],
-    low:  ['Low-on-face strikes', ['Standing up through impact', wood ? 'Tee too low' : 'Low point too high (thin)'], [wood ? 'Tee higher' : 'Keep posture; pressure forward', 'Low strikes add spin and lose speed'], null],
-    high: ['High-on-face strikes', [wood ? 'Teed high with a strongly upward AoA' : 'Steep, deep strike'], [wood ? 'Slightly high is ideal for driver (higher launch, less spin); too high pops it up' : 'Shallow the AoA'], null],
-  }[inp.strike];
-  if (STR) add('strike', 1, STR[0], 'Strike location: ' + inp.strike, STR[1], STR[2], STR[3]);
-
-  return [...faults.values()].sort((a, b) => b.sev - a.sev);
-}
-function withEv(tpl, ev, sev) { const t = tpl.slice(); t[1] = sev; t[3] = ev; return t; }
-
-function renderDiag() {
-  const inp = readDiag(), d = derive(inp), T = targets(inp.club, inp.speed), c = CLUBS[inp.club];
-  const shape = shapeName(inp, d);
-  const nv = (v, dec = 1, u = '°', signed = true) => v === undefined || v === null ? '—' : (signed ? fmtSigned(v, dec) : v.toFixed(dec)) + `<i>${u}</i>`;
-  document.getElementById('dDerived').innerHTML =
-    tile('Shot shape', shape ?? (inp.miss ? document.querySelector('#dMiss option:checked').text.split(' (')[0] : '—'), '') +
-    tile('Face to path', nv(d.f2p).replace('<i>°</i>', ''), d.f2p !== undefined ? '°' : '') +
-    tile('Start line (est.)', nv(d.start).replace('<i>°</i>', ''), d.start !== undefined ? '°' : '') +
-    tile('Dynamic loft (est.)', d.dl !== undefined ? d.dl.toFixed(1) : '—', d.dl !== undefined ? '°' : '') +
-    tile('Spin loft (est.)', d.spinLoft !== undefined ? d.spinLoft.toFixed(1) : '—', d.spinLoft !== undefined ? '°' : '') +
-    tile('Expected spin', d.expSpin ? (Math.round(d.expSpin / 50) * 50).toLocaleString() : '—', d.expSpin ? 'rpm' : '') +
-    tile('Ball speed (est.)', d.ballSpeed ? d.ballSpeed.toFixed(0) : '—', d.ballSpeed ? 'mph' : '') +
-    tile('Club', c.name, '');
-
-  const rows = [['aoa', 'Attack angle', '°'], ['launch', 'Launch angle', '°'], ['spin', 'Spin rate', 'rpm'], ['path', 'Club path', '°'], ['face', 'Face angle', '°'], ['f2p', 'Face to path', '°']];
-  document.getElementById('dTable').innerHTML = '<tr><th>Metric</th><th>Yours</th><th>Target</th><th></th></tr>' + rows.map(([k, label, u]) => {
-    const v = k === 'f2p' ? d.f2p : inp[k];
-    const [a, b] = T[k];
-    const fmtV = x => k === 'spin' ? Math.round(x).toLocaleString() : (['aoa', 'path', 'face', 'f2p'].includes(k) ? fmtSigned(x, 1) : x.toFixed(1));
-    let st = '<span class="pill unk">no data</span>';
-    if (v !== undefined && v !== null) st = v < a ? `<span class="pill bad">low by ${fmtV(a - v).replace('+', '')}</span>` : v > b ? `<span class="pill bad">high by ${fmtV(v - b).replace('+', '')}</span>` : '<span class="pill ok">in window</span>';
-    return `<tr><td>${label}</td><td>${v === undefined || v === null ? '—' : fmtV(v) + ' ' + u}</td><td>${fmtV(a)} to ${fmtV(b)} ${u}</td><td>${st}</td></tr>`;
-  }).join('');
-  document.getElementById('dTargetNote').textContent = inp.club === 'driver'
-    ? `Driver launch/spin windows are distance-optimal for ${inp.speed ? inp.speed + ' mph' : 'about 95 mph (enter your speed)'}. Tour average AoA is about −1°, but +2 to +5° adds carry.`
-    : inp.speed
-      ? `Windows are scaled from tour averages (${c.name} at ${PROFILES.tour.clubs[inp.club].speed} mph) to your ${inp.speed} mph: spin scales with speed, launch shifts up slightly for slower swings.`
-      : `Windows are tour averages for the ${c.name} at ${PROFILES.tour.clubs[inp.club].speed} mph. Enter your club speed to scale them.`;
-
-  const faults = diagnose(inp, d);
-  const SEV = { 3: ['Primary', 'sev3'], 2: ['Significant', 'sev2'], 1: ['Minor', 'sev1'], 0: ['Good', 'sev0'] };
-  const anyInput = DNUMS.some(([k]) => inp[k] !== null) || Object.keys(D_SELECTS).some(k => k !== 'club' && inp[k]);
-  document.getElementById('dFaults').innerHTML = !anyInput
-    ? '<p class="hint">Enter some numbers or pick your typical miss to get a diagnosis.</p>'
-    : faults.filter(f => f.sev > 0).length === 0
-      ? '<div class="fault sev0"><h3>No faults detected</h3><p>Everything you entered is inside the target windows. Add more numbers for a deeper check.</p></div>' + faults.map(faultHTML).join('')
-      : faults.map(faultHTML).join('');
-  function faultHTML(f) {
-    const [lab, cls] = SEV[f.sev];
-    return `<div class="fault ${cls}"><div class="fh"><span class="pill ${cls}">${lab}</span><h3>${f.title}</h3></div>
-      <ul class="ev">${f.evidence.map(e => `<li>${e}</li>`).join('')}</ul>
-      ${f.causes.length ? `<div class="cols"><div><b>Likely causes</b><ul>${f.causes.map(x => `<li>${x}</li>`).join('')}</ul></div>
-      <div><b>How to fix it</b><ul>${f.fixes.map(x => `<li>${x}</li>`).join('')}</ul></div></div>` : ''}
-      ${f.drill ? `<p class="drill"><b>Drill:</b> ${f.drill}</p>` : ''}</div>`;
-  }
-}
-
-document.querySelectorAll('#tabDiag input, #tabDiag select').forEach(el => el.addEventListener('input', renderDiag));
-
-const EXAMPLES = {
-  slicer:     { club: 'driver', speed: 92, aoa: -2.5, launch: 13.5, spin: 3600, path: -5, face: 1, divotLoc: '', divotDepth: '', divotDir: '', strike: 'heel', miss: 'slice' },
-  fatthin:    { club: '7i', speed: 76, aoa: 0.5, launch: 22, spin: 7900, path: -1, face: 0, divotLoc: 'before', divotDepth: 'shallow', divotDir: 'straight', strike: 'low', miss: 'fat' },
-  downdriver: { club: 'driver', speed: 100, aoa: -4, launch: 9, spin: 3400, path: -2.5, face: -1.5, divotLoc: '', divotDepth: '', divotDir: '', strike: 'low', miss: 'low' },
-  hook:       { club: '7i', speed: 84, aoa: -3, launch: 15, spin: 6200, path: 6, face: 0.5, divotLoc: 'after', divotDepth: 'medium', divotDir: 'right', strike: 'toe', miss: 'hook' },
-  tour:       { club: '7i', speed: 90, aoa: -4.3, launch: 16.3, spin: 7097, path: 0.5, face: 0, divotLoc: 'after', divotDepth: 'medium', divotDir: 'straight', strike: 'center', miss: '' },
-  clear:      { club: '7i', speed: null, aoa: null, launch: null, spin: null, path: null, face: null, divotLoc: '', divotDepth: '', divotDir: '', strike: '', miss: '' },
-};
-document.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => {
-  const ex = EXAMPLES[b.dataset.ex];
-  for (const [k] of DNUMS) document.getElementById('d_' + k).value = ex[k] ?? '';
-  for (const [k, id] of Object.entries(D_SELECTS)) document.getElementById(id).value = ex[k];
-  renderDiag();
-});
-
-// Push the entered delivery into the swing model
-document.getElementById('dLoad').onclick = () => {
-  const inp = readDiag(), d = derive(inp), base = PROFILES.tour.clubs[inp.club];
-  const dl = d.dl !== undefined ? Math.round(d.dl * 2) / 2 : base.dl;
-  Object.assign(state, deliveryState(inp.club, {
-    speed: inp.speed ?? base.speed, vsp: base.vsp, aoa: inp.aoa ?? base.aoa, path: inp.path ?? 0, face: inp.face ?? 0, dl: clamp(dl, 4, 65),
-  }), { profile: null, depthAuto: true });
-  if (inp.strike === 'low' || inp.miss === 'thin') { state.depthAuto = false; state.depth = Math.round((computeModel(state).lowDepth / IN + 0.35) * 100) / 100; }
-  if (inp.divotLoc === 'before' || inp.miss === 'fat') { state.depthAuto = false; state.depth = -0.35; }
-  showTab('model');
-  syncControls(); render();
-};
-
 // ---------- tabs ----------
 function showTab(t) {
   document.getElementById('tabModel').hidden = t !== 'model';
-  document.getElementById('tabDiag').hidden = t !== 'diag';
   document.getElementById('tabLearn').hidden = t !== 'learn';
   document.getElementById('tab3d').hidden = t !== 's3';
   document.getElementById('tabAz').hidden = t !== 'az';
@@ -1561,7 +1184,6 @@ function showTab(t) {
   if (t !== 's3' && typeof s3Stop === 'function' && s3Res) s3Stop();
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   if (t === 'model') render();
-  else if (t === 'diag') renderDiag();
   else if (t === 's3') { if (!s3Res) s3Init(); else s3Draw(); }
   else if (t === 'az') { if (!az.started) azInit(); azDraw(); }
   else if (t === 'opt') { if (!op.started) opInit(); else opDraw(); }
@@ -1569,7 +1191,6 @@ function showTab(t) {
   else learnDraws.forEach(d => d());
 }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
-renderDiag();
 
 // =====================================================================
 // Learn: articles with interactive diagrams
