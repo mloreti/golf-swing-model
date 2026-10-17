@@ -3091,7 +3091,9 @@ function azDraw() {
 function azMarks() {
   const cv = document.getElementById('azMarks'), { ctx, w, h } = prep(cv), A = az.panes[0];
   if (!A.video || !azDur(A)) return;
-  const X = t => 8 + t / azDur(A) * (w - 16), off = azOffset();
+  // line up with the main scrub bar: the thumb centre runs from half a thumb in from each end of the slider
+  const sl = document.getElementById('azT').getBoundingClientRect(), x0 = sl.left - cv.getBoundingClientRect().left, TH = 16;
+  const X = t => x0 + TH / 2 + clamp(t / azDur(A), 0, 1) * (sl.width - TH), off = azOffset();
   az.marks = [];
   for (const [pi, p] of az.panes.entries()) { if (!p.video || (pi && !az.compare)) continue;
     for (const [k, nm] of AZ_CP) if (p.cps[k] != null) { const x = X(p.cps[k] + (pi ? off : 0)); az.marks.push({ x, t: p.cps[k] + (pi ? off : 0) }); line(ctx, [[x, pi ? 12 : 2], [x, pi ? 22 : 12]], pi ? COL.plane : COL.accent, 2);
@@ -3169,7 +3171,7 @@ const AZ_LM_R = { nose: 0, earL: 7, earR: 8, shL: 11, shT: 12, elL: 13, elT: 14,
 const AZ_LM_L = { nose: 0, earL: 8, earR: 7, shL: 12, shT: 11, elL: 14, elT: 13, wrL: 16, wrT: 15, hipL: 24, hipT: 23, knL: 26, knT: 25, anL: 28, anT: 27 };
 const AZ_LM = { ...AZ_LM_R };
 const AZ_BONES = [['shL', 'shT'], ['shL', 'elL'], ['elL', 'wrL'], ['shT', 'elT'], ['elT', 'wrT'], ['shL', 'hipL'], ['shT', 'hipT'], ['hipL', 'hipT'], ['hipL', 'knL'], ['knL', 'anL'], ['hipT', 'knT'], ['knT', 'anT']];
-let azPoseLM = null, azPoseBusy = false, azPoseCancel = false;
+let azPoseLM = null, azPoseBusy = false, azPoseCancel = false, azPoseMs = -1;   // VIDEO mode needs timestamps that keep rising across every run, so B and re-runs carry on from the last one
 async function azGetLandmarker() {
   if (azPoseLM) return azPoseLM;
   const { FilesetResolver, PoseLandmarker } = await import(AZ_MP.lib);
@@ -3187,14 +3189,16 @@ async function azTrack() {
   const btn = document.getElementById('azTrack'); btn.textContent = 'Cancel';
   try {
     st.textContent = 'Loading the pose model (first time only)…';
-    const lm = await azGetLandmarker();
+    let lm;
+    try { lm = await azGetLandmarker(); }
+    catch (e) { e.azLoad = true; throw e; }
     const v = p.video, dur = azDur(p), step = Math.max(1 / az.fps, dur / 400), times = [], frames = [];
     const vw = v.videoWidth, vh = v.videoHeight, keepT = v.currentTime;
-    let lastMs = -1;
+    const base = azPoseMs + 1;
     for (let t = 0; t <= dur - 1e-3; t += step) {
       if (azPoseCancel) break;
       await azSeek(v, t);
-      let ms = Math.round(t * 1000); if (ms <= lastMs) ms = lastMs + 1; lastMs = ms;
+      const ms = Math.max(base + Math.round(t * 1000), azPoseMs + 1); azPoseMs = ms;
       const r = lm.detectForVideo(v, ms), L = r.landmarks && r.landmarks[0];
       times.push(t); frames.push(L ? L.map(q => ({ x: q.x * vw, y: q.y * vh, v: q.visibility ?? 1 })) : null);
       st.textContent = `Tracking… ${Math.round(t / dur * 100)}%`;
@@ -3202,10 +3206,12 @@ async function azTrack() {
     }
     p.pose = azSmooth(times, frames);
     const found = frames.filter(Boolean).length;
-    st.textContent = azPoseCancel ? `Stopped: ${found} frames tracked.` : `Tracked ${found} of ${frames.length} frames.${found < frames.length * 0.8 ? ' The body was not found in some frames; a clearer, full-body shot helps.' : ''}`;
+    st.textContent = azPoseCancel ? `Stopped: ${found} frames tracked.` : `Tracked ${found} of ${frames.length} frames.${!found ? ' No body was found; use a clear, full-body shot.' : found < frames.length * 0.8 ? ' The body was not found in some frames; a clearer, full-body shot helps.' : ''}`;
     await azSeek(v, keepT);
   } catch (e) {
-    st.textContent = `Couldn't load the pose model (${e.message || e}). It needs an internet connection the first time.`;
+    if (e.azLoad) st.textContent = `Couldn't load the pose model (${e.message || e}). It needs an internet connection the first time.`;
+    else { st.textContent = `Tracking failed (${e.message || e}). Try again.`;
+      try { azPoseLM && azPoseLM.close(); } catch {} azPoseLM = null; azPoseMs = -1; }   // start a fresh model next time
   }
   azPoseBusy = false; btn.textContent = 'Track body'; azSyncSide(); azDraw();
 }
@@ -3291,7 +3297,7 @@ function azSeriesData(p, key) {
 function azChart() {
   const cv = document.getElementById('azChart'); if (!cv || cv.offsetParent === null) return;
   const { ctx, w, h } = prep(cv), key = document.getElementById('azSeries').value, S = AZ_SERIES[key], A = az.panes[0];
-  const sets = az.panes.filter((p, i) => p.pose && (!i || az.compare)).map(p => ({ p, d: azSeriesData(p, key), off: p.i ? azOffset() : 0 }));
+  const sets = az.panes.filter((p, i) => p.pose && (!i || az.compare)).map(p => ({ p, d: azSeriesData(p, key), off: p.i ? azOffset() : 0 })).filter(s => s.d);   // no body found → nothing to plot
   if (!sets.length) { label(ctx, 'Track the body (Auto tracking card) to see how it moves through the swing.', w / 2, h / 2, COL.muted, 'center', false); return; }
   const bench = azBenchData(A, key);
   const dur = azDur(A) || 1, vals = [...sets.flatMap(s => s.d.filter(Boolean).map(q => q[1])), ...(bench || []).filter(Boolean).map(q => q[1]), ...(bench ? bench.keys.map(q => q[1]) : [])], lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), pad = (hi - lo) * 0.1 || 1;
