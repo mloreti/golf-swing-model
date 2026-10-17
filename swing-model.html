@@ -36,6 +36,10 @@ button.primary{background:var(--accent);color:#0b1a12;border-color:var(--accent)
 .m{background:var(--panel2);border-radius:7px;padding:6px 9px}
 .m .k{font-size:11px;color:var(--muted)}
 .m .v{font-size:16px;font-weight:650;font-variant-numeric:tabular-nums}
+.m.good .v{color:var(--accent)}.m.bad .v{color:var(--low)}
+.opgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:1100px){.opgrid{grid-template-columns:1fr}}
+.opclubs{grid-template-columns:repeat(3,1fr)}
 .m .v i{font-style:normal;font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
 .shape{margin-top:8px;padding:8px 10px;border-radius:7px;background:var(--panel2);font-weight:600;text-align:center}
 main{display:grid;grid-template-rows:auto auto;align-content:start;gap:14px;min-width:0}
@@ -187,7 +191,7 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <body>
 <header>
   <h1>Golf Swing Model</h1>
-  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button></nav>
+  <nav class="tabs"><button data-tab="model" class="on">Model</button><button data-tab="diag">Diagnose</button><button data-tab="learn">Learn</button><button data-tab="s3">3D Swing</button><button data-tab="az">Analyze</button><button data-tab="opt">Optimizer</button></nav>
   <div class="hand" id="hand" data-nolr><button data-hand="R" class="on">Right-handed</button><button data-hand="L">Left-handed</button></div>
 </header>
 
@@ -415,6 +419,45 @@ table.tgt td{padding:7px 8px;border-bottom:1px solid var(--line)}
 <div class="app learn" id="tabLearn" hidden>
   <aside><div class="card"><h2>Topics</h2><nav class="topics" id="lTopics"></nav></div></aside>
   <main><article class="card article" id="lArticle"></article></main>
+</div>
+
+<div class="app" id="tabOpt" hidden>
+  <aside>
+    <div class="card">
+      <h2>Club</h2>
+      <div class="clubs opclubs" id="opClubs"></div>
+      <div id="opSliders"></div>
+      <div class="azrow"><button id="opReset">Reset to tour</button><button id="opCenter">Center strike</button></div>
+      <div class="azrow"><button id="opSave">Save shot to compare</button><button id="opClearSaved">Clear saved</button></div>
+      <div id="opSavedList" class="hint" style="margin:4px 0 0"></div>
+    </div>
+    <div class="card">
+      <h2>Find the optimum</h2>
+      <p class="hint" id="opGoal"></p>
+      <button class="primary" id="opBest" style="width:100%">Set best attack angle &amp; loft</button>
+      <p class="hint" id="opBestNote" style="margin:8px 0 0"></p>
+    </div>
+  </aside>
+  <main>
+    <div class="view">
+      <div class="bar">
+        <h3>Ball flight</h3>
+        <button data-opcam="dtl">Behind</button><button data-opcam="side">Side</button><button data-opcam="top">Overhead</button>
+        <button class="primary" id="opReplay">▶ Replay</button>
+      </div>
+      <canvas id="opFlight3d" data-mirror style="height:380px"></canvas>
+    </div>
+    <div class="card">
+      <h2>Launch &amp; flight</h2>
+      <div class="metrics m4s" id="opMetrics"></div>
+      <div class="shape" id="opShape"></div>
+    </div>
+    <div class="opgrid">
+      <div class="view"><div class="bar"><h3>Side &amp; overhead</h3></div><canvas id="opFlight2d" data-mirror style="height:320px"></canvas></div>
+      <div class="view"><div class="bar"><h3 id="opMapTitle">Carry map</h3></div><canvas id="opMap" style="height:320px;cursor:crosshair"></canvas>
+        <p class="hint" id="opMapNote" style="margin:0;padding:0 12px 10px"></p></div>
+    </div>
+  </main>
 </div>
 
 <script id="physics">
@@ -1513,6 +1556,7 @@ function showTab(t) {
   document.getElementById('tabLearn').hidden = t !== 'learn';
   document.getElementById('tab3d').hidden = t !== 's3';
   document.getElementById('tabAz').hidden = t !== 'az';
+  document.getElementById('tabOpt').hidden = t !== 'opt';
   if (t !== 'az' && az.started) azPause();
   if (t !== 's3' && typeof s3Stop === 'function' && s3Res) s3Stop();
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
@@ -1520,6 +1564,7 @@ function showTab(t) {
   else if (t === 'diag') renderDiag();
   else if (t === 's3') { if (!s3Res) s3Init(); else s3Draw(); }
   else if (t === 'az') { if (!az.started) azInit(); azDraw(); }
+  else if (t === 'opt') { if (!op.started) opInit(); else opDraw(); }
   else if (!learnStarted) { learnStarted = true; showTopic('aoa'); }
   else learnDraws.forEach(d => d());
 }
@@ -3539,6 +3584,330 @@ function azInit() {
   window.addEventListener('resize', () => !document.getElementById('tabAz').hidden && azDraw());
   az.started = true; azSyncSide(); azLayout();
 }
+
+// =====================================================================
+// Optimizer: set the impact numbers directly and see the launch and flight. Same ball-flight physics as the Model tab
+// (tour ball, calm, sea level), with strike location added: off-centre hits lose ball speed, and gear effect
+// tilts the spin axis (toe = draw spin) and shifts launch.
+// =====================================================================
+const OP_CLUBS = ['driver', '7i', 'sw'];
+// per club: slider ranges for loft and attack angle, and the carry map grid. The map stays inside deliveries a golfer
+// can make: irons off the turf hit down (AoA ≤ −1°) with at most ~12° of shaft lean below static loft.
+const OP_RANGE = {
+  driver: { dl: [5, 24], aoa: [-6, 8], map: { aoa: [-4, 7, 0.5], dl: [6, 22, 1] }, land: 0 },
+  '7i':   { dl: [12, 40], aoa: [-9, 3], map: { aoa: [-8, -1, 0.5], dl: [20, 36, 1] }, land: 45 },
+  sw:     { dl: [30, 64], aoa: [-10, 3], map: { aoa: [-9, -1, 0.5], dl: [44, 62, 1] }, land: 50 },
+};
+const OP_SL = [
+  ['speed', 'Club speed', 40, 135, 1, 'mph', ''],
+  ['dl', 'Delivered loft', 5, 64, 0.5, '°', 'Face loft at impact (static loft − shaft lean)'],
+  ['aoa', 'Attack angle', -10, 8, 0.1, '°', '+ hitting up, − hitting down'],
+  ['path', 'Club path', -10, 10, 0.1, '°', '+ in-to-out (right of target), − out-to-in'],
+  ['face', 'Face angle', -10, 10, 0.1, '°', '+ open (right of target), − closed'],
+  ['spin', 'Spin rate', 800, 13000, 50, 'rpm', 'Auto = what this delivery produces. Untick to set it yourself.'],
+  ['toe', 'Strike: heel ↔ toe', -0.8, 0.8, 0.05, 'in', '+ toward the toe, − toward the heel'],
+  ['high', 'Strike: low ↔ high', -0.5, 0.5, 0.05, 'in', '+ high on the face, − low'],
+];
+const opTour = club => { const p = PROFILES.tour.clubs[club]; return { speed: p.speed, dl: p.dl, aoa: p.aoa, path: p.path, face: p.face, spin: 0, spinAuto: true, toe: 0, high: 0 }; };
+const op = { club: 'driver', by: Object.fromEntries(OP_CLUBS.map(c => [c, opTour(c)])), saved: { driver: [], '7i': [], sw: [] },
+  res: null, cam: 'dtl', anim: null, raf: 0, map: null, mapT: 0, started: false };
+const OP_SAVE_COL = ['#b48cff', '#4aa8ff', '#e4ebe7'];
+
+function opCompute(club, s) {
+  const c = CLUBS[club], wood = club === 'driver';
+  const a = s.aoa * D2R, pa = s.path * D2R;
+  const P = V(Math.cos(a) * Math.cos(pa), Math.sin(a), Math.cos(a) * Math.sin(pa));            // club path
+  const DL = s.dl * D2R, FA = s.face * D2R;
+  const F = V(Math.cos(DL) * Math.cos(FA), Math.sin(DL), Math.cos(DL) * Math.sin(FA));          // face normal
+  const slR = Math.acos(clamp(dot(P, F), -1, 1)), spinLoft = slR * R2D;
+  let ax0 = cross(P, F); ax0 = len(ax0) < 1e-6 ? V(0, 0, 1) : norm(ax0);
+  let tilt = Math.atan2(-ax0.y, ax0.z) * R2D;                                                  // + = fade/slice
+  let smash = Math.min(1.52, c.smash * Math.cos(Math.min(slR, 1.4)) / Math.cos(c.refSL * D2R));
+  const kf = 0.86 - 0.002 * spinLoft, L0 = norm(add(mul(P, 1 - kf), mul(F, kf)));
+  let vla = Math.asin(L0.y) * R2D, hla = Math.atan2(L0.z, L0.x) * R2D;
+  // strike location
+  const v = s.high, h = s.toe;
+  smash *= Math.max(0.5, 1 - (wood ? 0.08 : 0.15) * Math.abs(v)) * Math.max(0.5, 1 - (wood ? 0.09 : 0.14) * Math.abs(h));
+  vla += (wood ? 2.5 : 1.5) * v;                       // high = higher launch
+  hla += (wood ? 2.0 : 1.0) * h;                       // toe hits twist the face open, heel closed
+  tilt += -(wood ? 16 : 5) * h;                        // gear effect: toe → draw spin, heel → fade spin
+  const spinMul = clamp(wood ? 1 - 0.3 * v : 1 + 0.15 * v, 0.3, 1.6);
+  const ballMph = s.speed * smash;
+  const spinAuto = ballMph * spinLoft * c.spinK * spinMul;
+  const spin = s.spinAuto ? spinAuto : s.spin;
+  const lr = vla * D2R, hr = hla * D2R;
+  const L = V(Math.cos(lr) * Math.cos(hr), Math.sin(lr), Math.cos(lr) * Math.sin(hr));
+  const a0 = norm(V(-L.z, 0, L.x)), b0 = norm(cross(L, a0)), t = tilt * D2R;
+  const axis = norm(add(mul(a0, Math.cos(t)), mul(b0, Math.sin(t))));
+  const flight = simulateFlight(ballMph * MPH, L, axis, spin);
+  return { club, P, F, L, axis, spinLoft, f2p: s.face - s.path, smash, ballMph, spin, spinAuto, vla, hla, spinAxis: tilt, flight, aoa: s.aoa, path: s.path };
+}
+
+// ---- controls ----
+function opBuild() {
+  document.getElementById('opClubs').innerHTML = OP_CLUBS.map(k => `<button data-opclub="${k}">${CLUBS[k].name}</button>`).join('');
+  document.querySelectorAll('[data-opclub]').forEach(b => b.onclick = () => { op.club = b.dataset.opclub; op.map = null; document.getElementById('opBestNote').textContent = ''; opSavedList(); opSync(); opUpdate(); });
+  const el = document.getElementById('opSliders');
+  for (const [k, nm, mn, mx, st, u, help] of OP_SL) {
+    const div = document.createElement('div'); div.className = 'ctrl';
+    div.innerHTML = `<div class="row"><span>${nm}${k === 'spin' ? ' <label style="color:var(--muted);font-size:12px;margin-left:6px"><input type="checkbox" id="op_spinAuto"> Auto</label>' : ''}</span><b id="opv_${k}"></b></div>
+      <input type="range" id="ops_${k}" min="${mn}" max="${mx}" step="${st}">${help ? `<small>${help}</small>` : ''}`;
+    el.appendChild(div);
+    div.querySelector('input[type=range]').addEventListener('input', e => { const s = op.by[op.club]; s[k] = +e.target.value; if (k === 'spin') s.spinAuto = false; opSync(); opUpdate(); });
+  }
+  document.getElementById('op_spinAuto').onchange = e => { const s = op.by[op.club]; s.spinAuto = e.target.checked; if (!s.spinAuto) s.spin = Math.round(op.res.spinAuto / 50) * 50; opSync(); opUpdate(); };
+  document.getElementById('opReset').onclick = () => { op.by[op.club] = opTour(op.club); opSync(); opUpdate(); };
+  document.getElementById('opCenter').onclick = () => { Object.assign(op.by[op.club], { toe: 0, high: 0 }); opSync(); opUpdate(); };
+  document.getElementById('opSave').onclick = () => { const sv = op.saved[op.club]; if (sv.length >= 3) sv.shift();
+    sv.push({ res: op.res, s: { ...op.by[op.club] } }); opSavedList(); opDraw(); };
+  document.getElementById('opClearSaved').onclick = () => { op.saved[op.club] = []; opSavedList(); opDraw(); };
+  document.getElementById('opBest').onclick = opBest;
+  document.getElementById('opReplay').onclick = () => opPlay();
+  document.querySelectorAll('[data-opcam]').forEach(b => b.onclick = () => { op.cam = b.dataset.opcam; opDraw(); });
+  const mp = document.getElementById('opMap');
+  mp.addEventListener('mousemove', e => { const r = mp.getBoundingClientRect(); op.hover = [e.clientX - r.left, e.clientY - r.top]; opDrawMap(); });
+  mp.addEventListener('mouseleave', () => { op.hover = null; opDrawMap(); });
+  mp.addEventListener('click', e => { const r = mp.getBoundingClientRect(), c = opMapCell(e.clientX - r.left, e.clientY - r.top); if (!c) return;
+    Object.assign(op.by[op.club], { aoa: c.aoa, dl: c.dl }); opSync(); opUpdate(); });
+  window.addEventListener('resize', () => !document.getElementById('tabOpt').hidden && opDraw());
+  const f3 = document.getElementById('opFlight3d');
+  f3.addEventListener('pointerdown', e => { if (opFaceDrag(e, true)) { op.faceDrag = true; f3.setPointerCapture(e.pointerId); } });
+  f3.addEventListener('pointermove', e => { if (op.faceDrag) return opFaceDrag(e);
+    const r = f3.getBoundingClientRect(), B = OP_INSET; let x = e.clientX - r.left; const y = e.clientY - r.top; if (LEFTY) x = r.width - x;
+    f3.style.cursor = x >= B.x && x <= B.x + B.w && y >= B.y && y <= B.y + B.h ? 'crosshair' : ''; });
+  f3.addEventListener('pointerup', () => op.faceDrag = false);
+}
+function opSync() {
+  const s = op.by[op.club], R = OP_RANGE[op.club];
+  document.querySelectorAll('[data-opclub]').forEach(b => b.classList.toggle('on', b.dataset.opclub === op.club));
+  for (const [k, , mn, mx, st, u] of OP_SL) {
+    const inp = document.getElementById('ops_' + k);
+    if (R[k]) { inp.min = R[k][0]; inp.max = R[k][1]; } else { inp.min = mn; inp.max = mx; }
+    const val = k === 'spin' && s.spinAuto ? (op.res ? Math.round(op.res.spinAuto / 50) * 50 : 0) : s[k];
+    inp.value = val;
+    const dec = st < 0.1 ? 2 : st < 1 ? 1 : 0, signed = ['aoa', 'path', 'face', 'toe', 'high'].includes(k);
+    document.getElementById('opv_' + k).textContent = (k === 'spin' ? Math.round(val).toLocaleString() : signed ? fmtSigned(val, dec) : val.toFixed(dec)) + ' ' + u;
+  }
+  document.getElementById('op_spinAuto').checked = s.spinAuto;
+  const land = R.land;
+  document.getElementById('opGoal').textContent = land
+    ? `Searches attack angle and delivered loft (path, face, speed and strike as set, spin auto) for the launch and spin closest to the tour window for this club and speed, landing at ${land}° or steeper so the ball holds a green. Irons are about control, so this aims for the window and leaves the extra yards. The search stays within a real iron strike: hitting down at least 1° with no more than about 12° of shaft lean.`
+    : 'Searches attack angle and delivered loft (path, face, speed and strike as set, spin auto) for the longest carry.';
+}
+function opSavedList() {
+  const sv = op.saved[op.club];
+  document.getElementById('opSavedList').innerHTML = sv.map((x, i) => `<span style="color:${OP_SAVE_COL[i]}">●</span> ${(x.res.flight.carry / YD).toFixed(0)} yd · ${x.res.vla.toFixed(1)}° · ${Math.round(x.res.spin).toLocaleString()} rpm`).join('<br>');
+}
+
+// ---- update ----
+function opUpdate() {
+  const s = op.by[op.club];
+  op.res = opCompute(op.club, s);
+  if (s.spinAuto) opSync();
+  opMetrics(); op.anim = null; opDraw();
+  clearTimeout(op.mapT); op.mapT = setTimeout(() => { opMapCompute(); opDrawMap(); }, 120);   // the map takes a few hundred flights
+}
+function opMetrics() {
+  const m = op.res, T = targets(op.club, op.by[op.club].speed), f = m.flight;
+  const inW = (v, w) => v >= w[0] && v <= w[1] ? 'good' : 'bad';
+  const t = (k, v, u, cls = '') => `<div class="m ${cls}"><div class="k">${k}</div><div class="v">${v}<i>${u}</i></div></div>`;
+  document.getElementById('opMetrics').innerHTML =
+    t('Ball speed', m.ballMph.toFixed(1), 'mph') + t('Smash', m.smash.toFixed(2), '') +
+    t('Launch', m.vla.toFixed(1), '°', inW(m.vla, T.launch)) + t('Launch dir', fmtSigned(m.hla), '°') +
+    t('Spin', Math.round(m.spin).toLocaleString(), 'rpm', inW(m.spin, T.spin)) + t('Spin axis', fmtSigned(m.spinAxis), '°') +
+    t('Spin loft', m.spinLoft.toFixed(1), '°') + t('Face to path', fmtSigned(m.f2p), '°') +
+    t('Carry', (f.carry / YD).toFixed(0), 'yd') + t('Apex', (f.apex / FT).toFixed(0), 'ft') +
+    t('Land angle', f.landAngle.toFixed(0), '°', OP_RANGE[op.club].land ? (f.landAngle >= OP_RANGE[op.club].land ? 'good' : 'bad') : '') + t('Side', fmtSigned(f.side / YD, 0), 'yd');
+  document.getElementById('opShape').innerHTML = `${shotShape(m)} <span style="color:var(--muted);font-weight:500">· tour window: launch ${T.launch[0]}–${T.launch[1]}°, spin ${T.spin[0].toLocaleString()}–${T.spin[1].toLocaleString()} rpm</span>`;
+}
+
+// ---- carry map over attack angle × delivered loft ----
+function opMapCompute() {
+  const s = op.by[op.club], g = OP_RANGE[op.club].map, cells = [];
+  const nA = Math.round((g.aoa[1] - g.aoa[0]) / g.aoa[2]) + 1, nD = Math.round((g.dl[1] - g.dl[0]) / g.dl[2]) + 1;
+  let best = null, lo = Infinity, hi = -Infinity;
+  // driver: longest carry. Irons and wedges: closest to the tour launch and spin window (the flight that holds greens).
+  const T = targets(op.club, s.speed), mid = w => (w[0] + w[1]) / 2, half = w => (w[1] - w[0]) / 2;
+  const score = c => op.club === 'driver' ? c.carry : -(((c.vla - mid(T.launch)) / half(T.launch)) ** 2 + ((c.spin - mid(T.spin)) / half(T.spin)) ** 2) + c.carry * 1e-4;
+  for (let i = 0; i < nA; i++) for (let j = 0; j < nD; j++) {
+    const aoa = +(g.aoa[0] + i * g.aoa[2]).toFixed(2), dl = g.dl[0] + j * g.dl[2];
+    const r = opCompute(op.club, { ...s, aoa, dl, spinAuto: true }), carry = r.flight.carry / YD, ok = r.flight.landAngle >= OP_RANGE[op.club].land;
+    cells.push({ i, j, aoa, dl, carry, ok, vla: r.vla, spin: r.spin, land: r.flight.landAngle });
+    lo = Math.min(lo, carry); hi = Math.max(hi, carry);
+    const cell = cells[cells.length - 1]; cell.score = score(cell);
+    if (ok && (!best || cell.score > best.score)) best = cell;
+  }
+  op.map = { club: op.club, cells, nA, nD, g, best, lo, hi };
+}
+function opMapBox(w, h) { return { x0: 46, y0: 12, pw: w - 60, ph: h - 50 }; }
+function opMapCell(x, y) {
+  const M = op.map; if (!M) return null; const cv = document.getElementById('opMap'), { x0, y0, pw, ph } = opMapBox(cv.clientWidth, cv.clientHeight);
+  if (x < x0 || x > x0 + pw || y < y0 || y > y0 + ph) return null;
+  const i = clamp(Math.floor((x - x0) / pw * M.nA), 0, M.nA - 1), j = clamp(Math.floor((y0 + ph - y) / ph * M.nD), 0, M.nD - 1);
+  return M.cells[i * M.nD + j];
+}
+function opDrawMap() {
+  const cv = document.getElementById('opMap'); if (cv.offsetParent === null) return;
+  const { ctx, w, h } = prep(cv), M = op.map; if (!M || M.club !== op.club) return;
+  const { x0, y0, pw, ph } = opMapBox(w, h), cw = pw / M.nA, ch = ph / M.nD;
+  // sequential: one hue (accent green), dark = short, bright = long
+  const col = c => { const k = (c - M.lo) / Math.max(1, M.hi - M.lo); return `rgb(${Math.round(20 + k * 75)},${Math.round(40 + k * 171)},${Math.round(32 + k * 122)})`; };
+  for (const c of M.cells) {
+    const x = x0 + c.i * cw, y = y0 + ph - (c.j + 1) * ch;
+    ctx.fillStyle = col(c.carry); ctx.fillRect(x, y, cw + 0.5, ch + 0.5);
+    if (!c.ok) { ctx.fillStyle = 'rgba(14,19,17,0.62)'; ctx.fillRect(x, y, cw + 0.5, ch + 0.5); }
+  }
+  ctx.save(); ctx.font = '11px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+  const X = a => x0 + (a - M.g.aoa[0] + M.g.aoa[2] / 2) / (M.g.aoa[2] * M.nA) * pw, Y = d => y0 + ph - (d - M.g.dl[0] + M.g.dl[2] / 2) / (M.g.dl[2] * M.nD) * ph;
+  for (let a = Math.ceil(M.g.aoa[0]); a <= M.g.aoa[1]; a += 2) ctx.fillText((a > 0 ? '+' : '') + a + '°', X(a), y0 + ph + 14);
+  ctx.fillText('Attack angle', x0 + pw / 2, y0 + ph + 30);
+  ctx.textAlign = 'right'; for (let d = Math.ceil(M.g.dl[0] / 4) * 4; d <= M.g.dl[1]; d += 4) ctx.fillText(d + '°', x0 - 6, Y(d) + 4);
+  ctx.save(); ctx.translate(12, y0 + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('Delivered loft', 0, 0); ctx.restore(); ctx.restore();
+  // best and current
+  if (M.best) { const p = [X(M.best.aoa), Y(M.best.dl)]; ctx.save(); ctx.translate(...p); ctx.rotate(Math.PI / 4); ctx.fillStyle = COL.start; ctx.strokeStyle = '#0e1311'; ctx.lineWidth = 1.5; ctx.fillRect(-5, -5, 10, 10); ctx.strokeRect(-5, -5, 10, 10); ctx.restore(); }
+  const s = op.by[op.club], cp = [X(s.aoa), Y(s.dl)];
+  if (cp[0] >= x0 && cp[0] <= x0 + pw && cp[1] >= y0 && cp[1] <= y0 + ph) { dot2(ctx, cp, 7, '#0e1311'); dot2(ctx, cp, 5, '#f4f6f5'); }
+  // hover readout
+  const c = op.hover && opMapCell(...op.hover);
+  if (c) {
+    const lines = [`AoA ${fmtSigned(c.aoa)}° · loft ${c.dl}°`, `carry ${c.carry.toFixed(0)} yd · land ${c.land.toFixed(0)}°`, `launch ${c.vla.toFixed(1)}° · ${Math.round(c.spin).toLocaleString()} rpm`];
+    const tx = clamp(op.hover[0] + 14, 0, w - 196), ty = clamp(op.hover[1] - 56, 0, h - 62);
+    ctx.save(); ctx.fillStyle = 'rgba(14,19,17,0.92)'; ctx.strokeStyle = 'rgba(228,235,231,0.2)'; ctx.fillRect(tx, ty, 190, 58); ctx.strokeRect(tx, ty, 190, 58);
+    ctx.font = '12px -apple-system,sans-serif'; ctx.fillStyle = COL.text; lines.forEach((l, i) => ctx.fillText(l, tx + 8, ty + 17 + i * 17)); ctx.restore();
+  }
+  const land = OP_RANGE[op.club].land;
+  document.getElementById('opMapTitle').textContent = `Carry map · ${CLUBS[op.club].name} at ${op.by[op.club].speed} mph`;
+  document.getElementById('opMapNote').innerHTML = `Brighter = longer carry (${M.lo.toFixed(0)}–${M.hi.toFixed(0)} yd). <span style="color:#f4f6f5">●</span> you · <span style="color:var(--start)">◆</span> ${op.club === 'driver' ? 'longest' : 'closest to the window'}${M.best ? ` (${M.best.carry.toFixed(0)} yd at ${fmtSigned(M.best.aoa)}°, ${M.best.dl}°)` : ''}${land ? ` · dimmed cells land flatter than ${land}°` : ''}. Click a cell to use it.`;
+}
+function opBest() {
+  opMapCompute(); const b = op.map.best; if (!b) return;
+  const before = op.res.flight.carry / YD;
+  Object.assign(op.by[op.club], { aoa: b.aoa, dl: b.dl, spinAuto: true }); opSync(); opUpdate();
+  document.getElementById('opBestNote').textContent = `${op.club === 'driver' ? 'Longest carry' : 'Closest to the window'}: attack angle ${fmtSigned(b.aoa)}°, delivered loft ${b.dl}°: ${b.carry.toFixed(0)} yd carry (${fmtSigned(b.carry - before, 0)} yd), launch ${b.vla.toFixed(1)}°, ${Math.round(b.spin).toLocaleString()} rpm.`;
+}
+
+// ---- drawing ----
+function opShots() { return [...op.saved[op.club].map((x, i) => ({ f: x.res.flight, col: OP_SAVE_COL[i], w: 1.8 })), { f: op.res.flight, col: COL.start, w: 2.6, cur: true }]; }
+function opDraw() { if (document.getElementById('tabOpt').hidden || !op.res) return; opDraw3d(); opDraw2d(); opDrawMap(); }
+function opDraw3d() {
+  const { ctx, w, h } = prep(document.getElementById('opFlight3d'));
+  const shots = opShots(), maxC = Math.max(60 * YD, ...shots.map(s => s.f.downrange)), X = Math.ceil(maxC / YD / 50) * 50 * YD;
+  const apex = Math.max(...shots.map(s => s.f.apex));
+  // behind: raised camera well behind the ball, looking down the target line
+  const eye = V(-X * 0.18, X * 0.06, X * 0.14), tg = V(X * 0.5, apex * 0.3, 0), dd = sub(tg, eye);   // off to one side so the arc shows
+  const cams = { dtl: { yaw: Math.atan2(-dd.z, -dd.x), pitch: Math.atan2(-dd.y, Math.hypot(dd.x, dd.z)), dist: len(dd), target: tg },
+    side: { yaw: 90 * D2R, pitch: 4 * D2R, dist: X * 0.85, target: V(X * 0.5, apex * 0.5, 0) },
+    top: { yaw: 180 * D2R, pitch: 88 * D2R, dist: X * 1.05, target: V(X * 0.5, 0, 0) } };
+  const pr = makeProj(w, h, cams[op.cam]);
+  // ground: yardage lines and the target line
+  const Z = 40 * YD;
+  let lastL = null;   // skip yardage labels that would crowd together in the distance
+  for (let y = 0; y <= X / YD + 1e-6; y += 50) { const x = y * YD; line(ctx, [pr(V(x, 0, -Z)), pr(V(x, 0, Z))], 'rgba(255,255,255,0.08)', 1);
+    const q = pr(V(x, 0, Z)); if (q && y && (!lastL || Math.hypot(q[0] - lastL[0], q[1] - lastL[1]) > 26)) { label(ctx, `${y}`, q[0], q[1] + 10, COL.muted, 'center', false); lastL = q; } }
+  for (let z = -40; z <= 40; z += 10) line(ctx, [pr(V(0, 0, z * YD)), pr(V(X, 0, z * YD))], z ? 'rgba(255,255,255,0.05)' : 'rgba(244,246,245,0.35)', 1, z ? null : [6, 6]);
+  const tq = pr(V(X, 0, 0)); if (tq) label(ctx, 'target', tq[0], tq[1] - 26, COL.muted, 'center', false);
+  const fr = op.anim ? op.anim.frac : 1;
+  for (const s of shots) {
+    const tEnd = s.f.time * (s.cur ? fr : 1), pts = s.f.pts.filter(p => p.t <= tEnd);
+    line(ctx, pts.map(p => pr(V(p.x, 0, p.z))), 'rgba(0,0,0,0.45)', s.w);                // shadow
+    line(ctx, pts.map(p => pr(V(p.x, p.y, p.z))), s.col, s.w);
+    const e = pts[pts.length - 1]; if (e) { const q = pr(V(e.x, e.y, e.z)); if (q) dot2(ctx, q, s.cur ? 4.5 : 3.5, s.col); }
+  }
+  if (fr >= 1) { const f = op.res.flight, q = pr(V(f.downrange, 0, f.side)); if (q) label(ctx, `${(f.carry / YD).toFixed(0)} yd`, q[0], q[1] + 16, COL.start, 'center'); }
+  opDrawFace(ctx);
+}
+// ---- strike-location inset: the face seen face-on from in front, as on impact tape: a right-handed head has its toe on the left and hosel on the right ----
+const OP_FACE = {   // inches from the sweet spot, x toward the toe, y up
+  driver: { w: 4.6, h: 2.5, hosel: [[-2.1, 0.5], [-2.55, 1.05]] },
+  '7i': { bot: -0.78, top: [0.72, 1.02], x: [-1.45, 1.4], hosel: [[-1.45, -0.45], [-2.05, 1.25]] },
+  sw: { bot: -0.78, top: [0.95, 1.38], x: [-1.4, 1.4], hosel: [[-1.4, -0.45], [-2.0, 1.4]] },
+};
+const OP_INSET = { x: 10, y: 10, w: 190, h: 136 };
+function opFaceGeom() {
+  const g = OP_FACE[op.club], B = OP_INSET, ih = B.h - 34;
+  const wIn = 5.6, hIn = op.club === 'driver' ? 3.0 : 2.6, sc = Math.min((B.w - 16) / wIn, ih / hIn);
+  const cx = B.x + B.w / 2 - 0.25 * sc, cy = B.y + 24 + ih / 2 + (op.club === 'driver' ? 0 : 0.1 * sc);
+  return { g, sc, cx, cy, P: (x, y) => [cx - x * sc, cy - y * sc] };   // x is toward the toe, drawn leftward
+}
+function opDrawFace(ctx) {
+  const B = OP_INSET, { g, sc, P } = opFaceGeom(), drv = op.club === 'driver';
+  ctx.save();
+  ctx.fillStyle = 'rgba(12,17,15,0.82)'; ctx.strokeStyle = COL.line; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(B.x, B.y, B.w, B.h, 8); ctx.fill(); ctx.stroke();
+  label(ctx, 'Strike', B.x + 10, B.y + 14, COL.muted, 'left', false);
+  // hosel
+  ctx.lineCap = 'round'; ctx.strokeStyle = '#59625e'; ctx.lineWidth = (drv ? 0.42 : 0.36) * sc;
+  ctx.beginPath(); ctx.moveTo(...P(...g.hosel[0])); ctx.lineTo(...P(...g.hosel[1])); ctx.stroke();
+  // face outline
+  ctx.beginPath();
+  if (drv) { const a = g.w / 2, b = g.h / 2;   // rounded driver face, a little deeper at the toe
+    ctx.moveTo(...P(-a, -0.1));
+    ctx.bezierCurveTo(...P(-a, b * 0.95), ...P(-a * 0.2, b * 1.05), ...P(a * 0.45, b * 1.02));
+    ctx.bezierCurveTo(...P(a * 1.08, b), ...P(a * 1.04, -b * 0.7), ...P(a * 0.55, -b));
+    ctx.lineTo(...P(-a * 0.6, -b));
+    ctx.bezierCurveTo(...P(-a * 0.95, -b * 0.95), ...P(-a, -b * 0.6), ...P(-a, -0.1));
+  } else { const [x0, x1] = g.x, [t0, t1] = g.top, r = 0.42;
+    ctx.moveTo(...P(x0, g.bot)); ctx.lineTo(...P(x1 - r, g.bot));
+    ctx.quadraticCurveTo(...P(x1 + 0.05, g.bot), ...P(x1 + 0.05, g.bot + r));
+    ctx.bezierCurveTo(...P(x1 + 0.08, t1), ...P(x1 - 0.2, t1 + 0.1), ...P(x1 - 0.55, t1 - 0.02));
+    ctx.lineTo(...P(x0 + 0.1, t0)); ctx.quadraticCurveTo(...P(x0 - 0.1, t0 - 0.1), ...P(x0 - 0.05, t0 - 0.4));
+    ctx.lineTo(...P(x0, g.bot)); }
+  ctx.closePath(); ctx.fillStyle = '#2a302d'; ctx.fill(); ctx.strokeStyle = '#9aa39f'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.save(); ctx.clip();
+  if (drv) for (let y = -0.75; y <= 0.76; y += 0.25) line(ctx, [P(-1.0, y), P(1.0, y)], 'rgba(255,255,255,0.06)', 1);   // face scoring
+  else for (let y = g.bot + 0.14; y < g.top[0] - 0.05; y += 0.16) line(ctx, [P(g.x[0] + 0.35, y), P(g.x[1] - 0.3, y)], 'rgba(255,255,255,0.14)', 1);   // grooves
+  line(ctx, [P(-0.25, 0), P(0.25, 0)], 'rgba(255,255,255,0.35)', 1); line(ctx, [P(0, -0.25), P(0, 0.25)], 'rgba(255,255,255,0.35)', 1);   // sweet spot
+  ctx.restore();
+  // saved strikes, then the current one
+  op.saved[op.club].forEach((x, i) => dot2(ctx, P(x.s.toe, x.s.high), 3.5, OP_SAVE_COL[i]));
+  const s = op.by[op.club], q = P(s.toe, s.high);
+  ctx.beginPath(); ctx.arc(q[0], q[1], 0.84 * sc / 2, 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill();   // ball footprint (dimple contact ≈ 0.84 in)
+  dot2(ctx, q, 4.5, COL.start);
+  const ty = B.y + B.h - 8;
+  label(ctx, 'toe', B.x + 10, ty, COL.muted, 'left', false); label(ctx, 'heel', B.x + B.w - 10, ty, COL.muted, 'right', false);
+  const txt = Math.abs(s.toe) < 0.01 && Math.abs(s.high) < 0.01 ? 'center'
+    : [Math.abs(s.toe) >= 0.01 ? `${Math.abs(s.toe).toFixed(2)}″ ${s.toe > 0 ? 'toe' : 'heel'}` : '', Math.abs(s.high) >= 0.01 ? `${Math.abs(s.high).toFixed(2)}″ ${s.high > 0 ? 'high' : 'low'}` : ''].filter(Boolean).join(' · ');
+  label(ctx, txt, B.x + B.w - 10, B.y + 14, COL.text, 'right', false);
+  ctx.restore();
+}
+// drag on the inset to move the strike
+function opFaceDrag(e, start) {
+  const cv = document.getElementById('opFlight3d'), r = cv.getBoundingClientRect(), B = OP_INSET;
+  let x = e.clientX - r.left; const y = e.clientY - r.top; if (LEFTY) x = r.width - x;
+  if (start && (x < B.x || x > B.x + B.w || y < B.y || y > B.y + B.h)) return false;
+  const { sc, cx, cy } = opFaceGeom(), s = op.by[op.club], q = v => +(Math.round(v / 0.05) * 0.05).toFixed(2);
+  s.toe = clamp(q((cx - x) / sc), -0.8, 0.8); s.high = clamp(q((cy - y) / sc), -0.5, 0.5);
+  opSync(); opUpdate(); return true;
+}
+function opDraw2d() {
+  const { ctx, w, h } = prep(document.getElementById('opFlight2d'));
+  const shots = opShots(), maxX = Math.max(60, Math.ceil(Math.max(...shots.map(s => s.f.downrange / YD)) / 50) * 50 + 25);
+  const pad = 34, sx = (w - pad - 12) / maxX, SX = x => pad + x * sx;
+  const sideH = h * 0.5, base = 18 + sideH, maxY = Math.max(15, Math.max(...shots.map(s => s.f.apex / YD)) * 1.25), sy = (sideH - 10) / maxY;
+  for (let x = 0; x <= maxX; x += 50) { line(ctx, [[SX(x), 18], [SX(x), h - 8]], 'rgba(255,255,255,0.05)', 1); label(ctx, x, SX(x), base + 10, COL.muted, 'center', false); }
+  line(ctx, [[pad, base], [w - 12, base]], '#3c5a44', 1.5);
+  label(ctx, 'Side', 10, 12, COL.muted, 'left', false);
+  const mid = base + 28 + (h - base - 36) / 2;
+  line(ctx, [[pad, mid], [w - 12, mid]], COL.text, 1, [4, 4]);
+  label(ctx, 'Overhead (true scale)', 10, base + 24, COL.muted, 'left', false);
+  for (const s of shots) {
+    const p = s.f.pts.map(q => ({ x: q.x / YD, y: q.y / YD, z: q.z / YD }));
+    line(ctx, p.map(q => [SX(q.x), base - q.y * sy]), s.col, s.w);
+    line(ctx, p.map(q => [SX(q.x), mid + q.z * sx]), s.col, s.w);
+    const e = p[p.length - 1]; dot2(ctx, [SX(e.x), mid + e.z * sx], s.cur ? 4.5 : 3.5, s.col);
+  }
+  const f = op.res.flight, ap = f.pts.reduce((a, p) => p.y > a.y ? p : a, f.pts[0]);
+  label(ctx, `Apex ${(f.apex / FT).toFixed(0)} ft`, SX(ap.x / YD), base - ap.y / YD * sy - 14, COL.text, 'center');
+  label(ctx, `${fmtSigned(f.side / YD, 0)} yd`, SX(f.downrange / YD) + 8, mid + f.side / YD * sx, COL.start);
+}
+function opPlay() {
+  if (op.raf) cancelAnimationFrame(op.raf);
+  const dur = op.res.flight.time / 2;   // 2× real time
+  op.anim = { t0: performance.now(), frac: 0 };
+  const step = now => { op.anim.frac = Math.min(1, (now - op.anim.t0) / 1000 / dur); opDraw3d(); op.raf = op.anim.frac < 1 ? requestAnimationFrame(step) : 0; if (!op.raf) op.anim = null; };
+  op.raf = requestAnimationFrame(step);
+}
+function opInit() { op.started = true; opBuild(); op.res = opCompute(op.club, op.by[op.club]); opSync(); opUpdate(); }
 
 // ---- handedness toggle ----
 // Page text is written for a right-hander; in left-handed mode every left/right word is swapped, including text rendered later.
