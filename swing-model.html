@@ -91,7 +91,7 @@ header{align-items:center}
 .azempty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);font-size:15px;cursor:pointer;text-align:center}
 .azempty span{font-size:12px;margin-top:4px}
 .azempty[hidden]{display:none}
-#azMarks{height:38px}
+#azMarks{height:48px}
 #azT{flex:1;min-width:200px}
 .azsubs{display:flex;gap:2px;border-top:1px solid var(--line)}
 .azsubs[hidden]{display:none}
@@ -801,7 +801,7 @@ function makeProj(w, h, c = cam) {
   const upv = cross(right, fwd);
   const f = Math.min(w, h * 1.6) * 0.85;
   const proj = p => { const r = sub(p, pos); const z = dot(r, fwd); if (z < 0.05) return null; return [w / 2 + dot(r, right) * f / z, h / 2 - dot(r, upv) * f / z, z]; };
-  proj.f = f;
+  proj.f = f; proj.right = right; proj.up = upv; proj.fwd = fwd;
   return proj;
 }
 
@@ -2103,7 +2103,11 @@ let learnStarted = false;
 // shift, tilt and posture) plus a wrist hinge that releases on a logistic curve. Body rotations are keyframed.
 // =====================================================================
 const S3T = { A: 0.25, top: 1.05, ds: 0.62, end: 2.15 };   // timeline: address hold, top, downswing duration, end (s)
-const S3_CLUBS = { '5i': { lie: 61 }, '7i': { lie: 62.5 }, pw: { lie: 64 } };
+// per club: lie (deg), default slider changes (def), clubhead size for drawing (m: toe/heel extent from the hosel line, radius, centre height)
+const S3_IRON_HEAD = { toe: 0.055, heel: 0.02, r: 0.02, up: 0.018 };
+// addr: shaft angle at address when the hands sit lower than the lie; stance: stand further back (dz, m), more upright (bend, deg), wider (wide, m)
+const S3_CLUBS = { driver: { lie: 57, addr: 49, stance: { dz: -0.29, bend: -4, wide: 0.05 }, def: { bp: 5 }, head: { toe: 0.09, heel: 0.025, r: 0.03, up: 0.03 }, tee: true },
+  '5i': { lie: 61 }, '7i': { lie: 62.5 }, pw: { lie: 64 } };
 const S3_DEF = { club: '7i', speed: 0, bp: 0, hipTop: 45, chestTop: 90, hipImp: 40, chestImp: 25, shift: 4, tilt: 22, ext: 0, dh: 0,
   bsLen: 120, hinge: 90, rel: 5.5, plane: 0, dir: 0, face: 0, drop: 0 };
 const S3K = { Rh: 0.56, thH: 64, k: 18, A: -45, g: 1.5, depth: -0.006 };   // g: shaft rotation per degree of wrist hinge (forearm rotation folded in)
@@ -2137,16 +2141,16 @@ function s3Key(t, P, v, lead = 0) {
 }
 // body pose at time t (no arms/club)
 function s3Body(t, P) {
-  const IN_ = 0.0254, bp = -P.bp * IN_;
+  const IN_ = 0.0254, bp = -P.bp * IN_, st = S3_CLUBS[P.club].stance || { dz: 0, bend: 0, wide: 0 };
   const pr = s3Key(t, P, [0, -P.hipTop, P.hipImp, 88], 0.04) * D2R;   // hips lead the downswing slightly
   const cr = s3Key(t, P, [0, -P.chestTop, P.chestImp, 100]) * D2R;
   const lam = s3Key(t, P, [6, 2, P.tilt, 16]) * D2R;
-  const bet = s3Key(t, P, [38, 37, 33 - P.ext * 2.5, 10]) * D2R;
+  const bet = s3Key(t, P, [38 + st.bend, 37 + st.bend, 33 + st.bend - P.ext * 2.5, 10]) * D2R;
   const px = s3Key(t, P, [0, -0.02, P.shift * IN_, P.shift * IN_ + 0.04], 0.05);
   const pz = s3Key(t, P, [0, 0, P.ext * IN_, P.ext * IN_]);
   const py = s3Key(t, P, [0, 0, P.dh * IN_ + 0.015, 0.05]);
   const heel = s3Key(t, P, [0, 0, 0.03, 0.11]);
-  const Pc = V(-0.01 + bp + px, 0.9 + py, -0.74 + pz);
+  const Pc = V(-0.01 + bp + px, 0.9 + py, -0.74 + st.dz + pz);
   const base = add(Pc, V(0, 0.08, 0));
   const tilt = v => m3.rx(bet, m3.rz(lam, v)), Rt = v => tilt(m3.ry(cr, v));
   // lead shoulder drop: the upper chest bends toward the target about the chest centre in the downswing
@@ -2160,13 +2164,13 @@ function s3Body(t, P) {
     dLead: sub(shL, shL0),                                   // the lead arm hangs from the lead shoulder, so the hands follow it
     axis: m3.rot(tilt(V(0, 1, 0)), fwd, -drop),
     head: D(add(base, tilt(V(0, 0.66, 0.05)))), nose: m3.rot(tilt(m3.ry(cr * 0.25, norm(V(0, -0.55, 0.85)))), fwd, -drop),
-    ankL: V(0.18 + bp, 0.07, -0.68), ankT: V(-0.2 + bp, 0.07 + heel * 0.5, -0.68),
+    ankL: V(0.18 + st.wide + bp, 0.07, -0.68 + st.dz), ankT: V(-0.2 - st.wide + bp, 0.07 + heel * 0.5, -0.68 + st.dz),
   };
 }
 const s3Addr = {};
 function s3Setup(club) {
   if (s3Addr[club]) return s3Addr[club];
-  const IN_ = 0.0254, lie = S3_CLUBS[club].lie * D2R, Lc = CLUBS[club].len * IN_ - 0.05;
+  const IN_ = 0.0254, lie = (S3_CLUBS[club].addr ?? S3_CLUBS[club].lie) * D2R, Lc = CLUBS[club].len * IN_ - 0.05;
   const head0 = V(-0.03, 0, 0), s0 = norm(V(-0.08, -Math.sin(lie), Math.cos(lie)));   // grip -> head
   const H0 = sub(head0, mul(s0, Lc));
   const th = S3K.thH * D2R, u = V(0, Math.sin(th), -Math.cos(th)), C0 = add(H0, mul(u, S3K.Rh));
@@ -2222,15 +2226,16 @@ function s3Measure(P, cal) {
 // reference body (default swing, ball centred) the hand circle is measured from
 const s3Ref = {};
 const s3BodyRef = club => s3Ref[club] || (s3Ref[club] = s3Body(0, { ...S3_DEF, club }));
-// per-club calibration so the default swing bottoms at S3K.depth, strikes the centre, has a square face and zero path,
+// per-club calibration so the default swing bottoms at S3K.depth (driver: meets the teed ball at the face centre), strikes the centre, has a square face and zero path,
 // and delivers dynamic loft = static loft − shaft lean
 const s3Cal = {};
 function s3Calib(club) {
   if (s3Cal[club]) return s3Cal[club];
-  const P = { ...S3_DEF, club }, cal = { dy: 0, dz: 0, roll: 0, dir: 0, dL: 0, v: 1 };
+  const P = s3Defaults(club), cal = { dy: 0, dz: 0, roll: 0, dir: 0, dL: 0, v: 1 }, C = CLUBS[club];
+  const tee = S3_CLUBS[club].tee, soleT = C.ballBottom + BALL_R - C.faceH;   // teed: the face centre meets the ball centre
   for (let k = 0; k < 8; k++) {
     const m = s3Measure(P, cal);
-    cal.dy -= m.bottom - S3K.depth; cal.dz -= m.head.z; cal.roll -= m.face; cal.dir -= m.path; cal.dL -= m.dl - (CLUBS[club].loft - m.lean);
+    cal.dy -= tee ? m.sole - soleT : m.bottom - S3K.depth; cal.dz -= m.head.z; cal.roll -= m.face; cal.dir -= m.path; cal.dL -= m.dl - (tee ? PROFILES.tour.clubs[club].dl : CLUBS[club].loft - m.lean);   // driver: tour dynamic loft (the face is tilted up at impact)
     cal.v = m.speedMS;
   }
   return (s3Cal[club] = cal);
@@ -2265,7 +2270,7 @@ function s3DrawFP() {
   ctx.font = '600 12px -apple-system,sans-serif'; ctx.fillStyle = COL.text; ctx.textAlign = 'left'; ctx.fillText('Force plate', 10, 17);
   ctx.textAlign = 'right'; ctx.fillStyle = COL.muted; ctx.font = '11px -apple-system,sans-serif'; ctx.fillText(`vertical ${f.Fv.toFixed(2)}× body weight`, w - 10, 17);
   // plates
-  const cx = w / 2 - (f.fL.x + f.fT.x) / 2 * 230, cy = 92, s = 230, X = p => [cx + p.x * s, cy - (p.z + 0.62) * s];
+  const cx = w / 2 - (f.fL.x + f.fT.x) / 2 * 230, cy = 92, s = 230, fz = (f.fL.z + f.fT.z) / 2, X = p => [cx + p.x * s, cy - (p.z - fz - 0.06) * s];
   for (const [foot, dir, share, nm] of [[f.fT, f.dirT, 1 - f.wL, 'Trail'], [f.fL, f.dirL, f.wL, 'Lead']]) {
     const c = X(add(foot, mul(dir, 0.05)));
     ctx.save(); ctx.strokeStyle = 'rgba(228,235,231,0.18)'; ctx.fillStyle = 'rgba(255,255,255,0.03)';          // plate
@@ -2296,9 +2301,9 @@ function s3DrawFP() {
 // ---- 3D swing tab: controls, state, rendering ----
 const S3_GROUPS = [
   ['Setup', [
-    { key: 'club', label: 'Club', options: { '5i': '5 iron', '7i': '7 iron', pw: 'PW' } },
-    { key: 'speed', label: 'Club speed (default swing)', min: 60, max: 110, step: 1, unit: ' mph', dec: 0 },
-    { key: 'bp', label: 'Ball position', min: -3, max: 3, step: 0.25, unit: ' in', signed: true, dec: 2, hint: '+ forward in the stance' },
+    { key: 'club', label: 'Club', options: { driver: 'Driver', '5i': '5 iron', '7i': '7 iron', pw: 'PW' } },
+    { key: 'speed', label: 'Club speed (default swing)', min: 60, max: 130, step: 1, unit: ' mph', dec: 0 },
+    { key: 'bp', label: 'Ball position', min: -3, max: 7, step: 0.25, unit: ' in', signed: true, dec: 2, hint: '+ forward of centre in the stance (driver default: off the lead heel)' },
   ]],
   ['Backswing', [
     { key: 'hipTop', label: 'Hip turn at the top', min: 20, max: 70, step: 1, unit: '°', dec: 0 },
@@ -2322,7 +2327,7 @@ const S3_GROUPS = [
     { key: 'face', label: 'Face rotation at impact', min: -8, max: 8, step: 0.25, unit: '°', signed: true, dec: 2, hint: '+ open (less forearm rotation), − closed' },
   ]],
 ];
-const s3Defaults = club => ({ ...S3_DEF, club, speed: PROFILES.tour.clubs[club].speed });
+const s3Defaults = club => ({ ...S3_DEF, ...S3_CLUBS[club].def, club, speed: PROFILES.tour.clubs[club].speed });
 let s3P = s3Defaults('7i');
 const s3Cam = { yaw: 200 * D2R, pitch: 12 * D2R, dist: 4.8, target: V(-0.05, 0.95, -0.45) };
 const S3_CAMS = { dtl: [180, 6, 4.8], fo: [90, 6, 4.8], top: [180, 86, 5.2], tgt: [0, 6, 4.8], iso: [200, 12, 4.8] };
@@ -2331,7 +2336,8 @@ const s3Opt = { trace: true, hands: false, ghost: true, shPlane: false, fp: true
 let s3Res = null, s3CmpRes = null, s3CmpSel = 'none', s3Snap = null, s3Raf = 0;
 // common faults, each a set of slider changes from the default (tour) swing
 const S3_PRESETS = {
-  tour: { name: 'Tour swing', p: {}, desc: 'Calibrated reference: shift onto the lead side, tilt away, hold the hinge. Square, centred, ball-first strike with forward shaft lean.' },
+  tour: { name: 'Tour swing', p: {}, desc: 'Calibrated reference: shift onto the lead side, tilt away, hold the hinge. Square, centred, ball-first strike with forward shaft lean.',
+    descDriver: 'Calibrated reference with the ball teed off the lead heel: the same body motion, with the arc bottoming out right at the ball, so the club meets it nearly level (tour average about −1°) in the centre of the face. Move the ball further forward to hit up on it.' },
   ott: { name: 'Over the top', p: { dir: -5, plane: 4, chestImp: 40, face: -1 }, desc: 'Steeper, out-to-in downswing with the chest open early. The face is open to the path: slice or pull-slice.' },
   cast: { name: 'Early release', p: { rel: -1.5, hinge: 80 }, desc: 'Wrist hinge thrown from the top (casting/scooping). Low point moves back, shaft lean disappears, loft goes up: fat and weak.' },
   hang: { name: 'Hanging back', p: { shift: 0.5, tilt: 30, hipImp: 25 }, desc: 'Little pressure shift and too much tilt away. The arc bottoms behind the ball: fat, with the club hitting up.' },
@@ -2355,7 +2361,7 @@ function s3Build() {
     ${gi === 0 ? '<button id="s3Reset" style="width:100%">Reset to tour swing</button>' : ''}</div>`).join('');
   el.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('input', () => {
     const k = inp.dataset.k;
-    if (k === 'club') s3P = { ...s3P, club: inp.value, speed: PROFILES.tour.clubs[inp.value].speed };
+    if (k === 'club') { const d0 = s3Defaults(s3P.club), d1 = s3Defaults(inp.value); s3P = { ...s3P, club: inp.value, speed: d1.speed, bp: s3P.bp - d0.bp + d1.bp }; }
     else s3P[k] = +inp.value;
     s3Sync(); s3Update();
   }));
@@ -2383,7 +2389,7 @@ function s3Sync() {
   let on = null;
   for (const [k, p] of Object.entries(S3_PRESETS)) { const q = { ...s3Defaults(s3P.club), ...p.p }; if (Object.keys(S3_DEF).every(x => x === 'club' || x === 'speed' || q[x] === s3P[x])) on = k; }
   document.querySelectorAll('#s3Ctrls [data-pre]').forEach(b => b.classList.toggle('on', b.dataset.pre === on));
-  document.getElementById('s3PreDesc').textContent = on ? S3_PRESETS[on].desc : 'Custom swing. Pick a preset, or compare against one below.';
+  document.getElementById('s3PreDesc').textContent = on ? (s3P.club === 'driver' && S3_PRESETS[on].descDriver || S3_PRESETS[on].desc) : 'Custom swing. Pick a preset, or compare against one below.';
 }
 // impact numbers, ball flight and traces for one set of parameters
 function s3Solve(P) {
@@ -2404,9 +2410,10 @@ function s3Update() {
 const s3Side = () => s3CmpRes && s3Opt.cmpMode === 'side';
 const S3_SIDE = 1.25;
 function s3Frame() { s3Cam.target = s3Side() ? V(0, 0.95, -0.45) : V(-0.05, 0.95, -0.45); if (s3Side()) s3Cam.dist = Math.max(s3Cam.dist, 6.2); }
-function s3Strike(m) {
-  const IN_ = 0.0254, sole = m.sole / IN_, early = m.early / IN_, toe = m.toe / IN_;
-  const kind = sole > BALL_IN - 0.12 ? 'Topped' : early > 0.2 ? `Fat (${early.toFixed(1)} in early)` : BALL_IN - (sole + 0.79) < -0.25 ? 'Thin' : 'Clean';
+function s3Strike(m, club) {
+  const IN_ = 0.0254, C = CLUBS[club], sole = (m.sole - C.ballBottom) / IN_, fh = C.faceH / IN_, early = m.early / IN_, toe = m.toe / IN_;   // sole height above the ball's bottom
+  const kind = sole > BALL_IN - 0.12 ? 'Topped' : early > 0.2 ? `Fat (${early.toFixed(1)} in early)` : BALL_IN - (sole + fh) < -0.25 ? (C.ballBottom ? 'Low on the face' : 'Thin')
+    : C.ballBottom && BALL_IN - (sole + fh) > 0.35 ? 'High on the face' : 'Clean';
   const side = toe > 1.2 ? 'shank risk' : toe > 0.4 ? `${toe.toFixed(1)} in toward heel` : toe < -0.4 ? `${(-toe).toFixed(1)} in toward toe` : 'centre';
   return { kind, side, good: kind === 'Clean' && Math.abs(toe) <= 0.4 };
 }
@@ -2419,12 +2426,12 @@ function s3Metrics(r) {
 }
 const s3v = (x, d, sg) => sg ? fmtSigned(x, d) : x.toFixed(d);
 function s3Readout() {
-  const st = s3Strike(s3Res.m), mt = s3Metrics(s3Res);
+  const st = s3Strike(s3Res.m, s3Res.P.club), mt = s3Metrics(s3Res);
   document.getElementById('s3Read').innerHTML = mt.map(([k, v, u, d, sg]) => `<div class="m"><div class="k">${k}</div><div class="v">${s3v(v, d, sg)}<i>${u}</i></div></div>`).join('');
   document.getElementById('s3Strike').innerHTML = `<b style="color:${st.good ? 'var(--accent)' : 'var(--low)'}">${st.kind}</b> · ${st.side} · ${shotShape(s3Res.fl)}`;
   const tb = document.getElementById('s3CmpTbl');
   if (!s3CmpRes) { tb.hidden = true; return; }
-  const ct = s3Metrics(s3CmpRes), cs = s3Strike(s3CmpRes.m), name = s3CmpSel === 'snap' ? 'Snapshot' : S3_PRESETS[s3CmpSel].name;
+  const ct = s3Metrics(s3CmpRes), cs = s3Strike(s3CmpRes.m, s3CmpRes.P.club), name = s3CmpSel === 'snap' ? 'Snapshot' : S3_PRESETS[s3CmpSel].name;
   tb.hidden = false;
   tb.innerHTML = `<thead><tr><th></th><th>This swing</th><th><span class="sw"></span>${name}</th><th>Difference</th></tr></thead><tbody>${mt.map(([k, v, u, d, sg], i) => {
     const c = ct[i][1], dv = v - c, big = Math.abs(dv) >= (u === 'yd' ? 5 : u === 'mph' ? 2 : 1);
@@ -2434,7 +2441,7 @@ function s3Readout() {
 }
 
 // ---- rendering ----
-const S3COL = { shirt: '#4c78a8', pants: '#2d3842', skin: '#c99f7c', shoe: '#d8dcda', glove: '#eef1ef', shaft: '#c9d1cd', grip: '#1d2321', head: '#aab4af' };
+const S3COL = { shirt: '#4c78a8', pants: '#3a4652', skin: '#c99f7c', shoe: '#e4e7e5', sole: '#5d6461', glove: '#f2f4f3', shaft: '#c9d1cd', grip: '#2a302e', head: '#b9c2bd', headDark: '#6f7874', crown: '#2b3033', belt: '#22282c', hat: '#2a3a52' };
 const S3CMP = '#b48cff';
 function shade(hex, k) { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(clamp(x * k, 0, 255))); return `rgb(${c})`; }
 function ik2(a, c, l1, l2, pole) {
@@ -2444,40 +2451,138 @@ function ik2(a, c, l1, l2, pole) {
   const pv = norm(sub(pole, mul(u, dot(pole, u))));
   return add(add(a, mul(u, x)), mul(pv, hgt));
 }
-// mannequin + club as a list of primitives at time t. o: { alpha, off (render offset), tint (shirt colour), only (filter) }
+// mannequin + club as a list of primitives at time t: tapered capsules (k 'c', radii r and r2), spheres ('s') and flat polygons ('p').
+// o: { alpha, off (render offset), tint (shirt colour), only (filter) }
+const lerp3 = (a, b, u) => add(a, mul(sub(b, a), u));
 function s3Prims(t, P, cal, o = {}) {
   const b = s3Body(t, P), c = s3Club(t, P, cal, b), out = [], off = o.off || V(0, 0, 0), alpha = o.alpha ?? 1, shirt = o.tint || S3COL.shirt;
-  const cap = (a, e, r, col, part) => out.push({ k: 'c', a: add(a, off), b: add(e, off), r, col, part, alpha });
-  const sph = (p, r, col) => out.push({ k: 's', a: add(p, off), r, col, alpha });
-  // legs
+  const cap = (a, e, r, col, r2 = r, part) => out.push({ k: 'c', a: add(a, off), b: add(e, off), r, r2, col, part, alpha });
+  const sph = (p, r, col, part) => out.push({ k: 's', a: add(p, off), r, col, part, alpha });
+  const poly = (pts, col, part) => out.push({ k: 'p', pts: pts.map(p => add(p, off)), col, part, alpha });
+  const up = b.axis, side = norm(sub(b.shL, b.shT)), midSh = lerp3(b.shL, b.shT, 0.5);
+  // legs: tapered thigh and shin, shoe with a sole
   const dirL = V(Math.sin(25 * D2R), 0, Math.cos(25 * D2R)), dirT = V(-Math.sin(10 * D2R), 0, Math.cos(10 * D2R));
   const kL = ik2(b.hipL, b.ankL, 0.45, 0.45, m3.ry(b.pr * 0.6, V(0.35, 0, 1))), kT = ik2(b.hipT, b.ankT, 0.45, 0.45, m3.ry(b.pr * 0.6, V(-0.25, 0, 1)));
-  cap(b.hipL, kL, 0.075, S3COL.pants); cap(kL, b.ankL, 0.055, S3COL.pants);
-  cap(b.hipT, kT, 0.075, S3COL.pants); cap(kT, b.ankT, 0.055, S3COL.pants);
-  cap(add(b.ankL, V(-dirL.x * 0.06, -0.04, -dirL.z * 0.06)), add(b.ankL, V(dirL.x * 0.17, -0.04, dirL.z * 0.17)), 0.045, S3COL.shoe);
-  const toeT = add(V(b.ankT.x, 0.03, b.ankT.z), mul(dirT, 0.17));
-  cap(add(b.ankT, V(-dirT.x * 0.06, -0.04 + b.heel * 0.5, -dirT.z * 0.06)), toeT, 0.045, S3COL.shoe);
-  // torso
-  cap(b.hipL, b.hipT, 0.11, S3COL.pants);
-  const midSh = mul(add(b.shL, b.shT), 0.5);
-  cap(b.base, mul(add(midSh, b.base), 0.5), 0.13, shirt); cap(mul(add(midSh, b.base), 0.5), midSh, 0.13, shirt);
-  cap(b.shL, b.shT, 0.07, shirt);
-  cap(b.neck, b.head, 0.05, S3COL.skin);
-  sph(b.head, 0.105, S3COL.skin); sph(add(b.head, mul(b.nose, 0.1)), 0.022, S3COL.skin);
-  // arms to the grip (lead hand on top, trail hand below it)
+  for (const [hp, kn, an] of [[b.hipL, kL, b.ankL], [b.hipT, kT, b.ankT]]) {
+    cap(hp, kn, 0.088, S3COL.pants, 0.06); cap(kn, an, 0.058, S3COL.pants, 0.042);
+  }
+  const heelL = add(b.ankL, V(-dirL.x * 0.06, -0.04, -dirL.z * 0.06)), toeL = add(b.ankL, V(dirL.x * 0.17, -0.045, dirL.z * 0.17));
+  const toeT = add(V(b.ankT.x, 0.03, b.ankT.z), mul(dirT, 0.17)), heelT = add(b.ankT, V(-dirT.x * 0.06, -0.04 + b.heel * 0.5, -dirT.z * 0.06));
+  for (const [h, tq] of [[heelL, toeL], [heelT, toeT]]) {
+    cap(add(h, V(0, -0.018, 0)), add(tq, V(0, -0.014, 0)), 0.03, S3COL.sole, 0.026);
+    cap(h, tq, 0.046, S3COL.shoe, 0.036);
+  }
+  // pelvis, belt and torso: abdomen, rib cage and lats taper up into the shoulders
+  cap(b.hipL, b.hipT, 0.12, S3COL.pants);
+  cap(add(b.hipL, mul(up, 0.075)), add(b.hipT, mul(up, 0.075)), 0.112, S3COL.belt);
+  const chest = lerp3(b.base, midSh, 0.55);
+  cap(b.base, chest, 0.125, shirt, 0.14); cap(chest, sub(midSh, mul(up, 0.04)), 0.14, shirt, 0.12);
+  for (const sg of [1, -1]) cap(add(b.base, add(mul(side, 0.07 * sg), mul(up, 0.06))), sub(lerp3(sg > 0 ? b.shL : b.shT, midSh, 0.3), mul(up, 0.07)), 0.085, shirt, 0.1);
+  cap(b.shL, b.shT, 0.072, shirt);
+  // neck and head: face, cap crown and brim (brim points where the eyes look)
+  const hUp = norm(sub(up, mul(b.nose, dot(up, b.nose)))), hFwd = b.nose, hSide = norm(cross(hUp, hFwd));
+  cap(b.neck, lerp3(b.neck, b.head, 0.55), 0.052, S3COL.skin, 0.046);
+  sph(add(b.head, add(mul(hFwd, 0.02), mul(hUp, -0.02))), 0.096, S3COL.skin);
+  sph(add(b.head, mul(hFwd, 0.1)), 0.02, S3COL.skin);
+  sph(add(b.head, add(mul(hUp, 0.03), mul(hFwd, -0.012))), 0.095, S3COL.hat);
+  const bc = add(b.head, add(mul(hUp, 0.035), mul(hFwd, 0.06))), bf = norm(sub(hFwd, mul(hUp, 0.25))), brim = [];
+  for (let i = 0; i <= 10; i++) { const a = (i / 10 - 0.5) * Math.PI; brim.push(add(bc, add(mul(bf, 0.075 * Math.cos(a)), mul(hSide, 0.085 * Math.sin(a))))); }
+  poly(brim, S3COL.hat);
+  // arms: short sleeve, upper arm, forearm to the wrist, then the hands wrapped around the grip (lead on top, trail below)
   const TH = add(c.H, mul(c.s, 0.085));
   const eL = ik2(b.shL, c.H, 0.3, 0.29, V(0.2, -1, -0.5)), eT = ik2(b.shT, TH, 0.3, 0.29, V(-0.3, -1, -0.5));
-  cap(b.shL, eL, 0.045, shirt); cap(eL, c.H, 0.037, S3COL.skin);
-  cap(b.shT, eT, 0.045, shirt); cap(eT, TH, 0.037, S3COL.skin);
-  sph(c.H, 0.04, S3COL.glove); sph(TH, 0.038, S3COL.skin);
-  // club
-  const butt = sub(c.H, mul(c.s, 0.06));
-  cap(butt, add(butt, mul(c.s, 0.26)), 0.012, S3COL.grip, 'club');
-  cap(add(butt, mul(c.s, 0.26)), c.head, 0.005, S3COL.shaft, 'club');
-  const toeDir = norm(cross(c.s, c.n)), hc = add(c.head, V(0, 0.018, 0));
-  cap(sub(hc, mul(toeDir, 0.02)), add(hc, mul(toeDir, 0.055)), 0.02, S3COL.head, 'club');
-  out.push({ k: 'face', part: 'club', a: add(add(sub(hc, mul(toeDir, 0.015)), mul(c.n, 0.021)), off), b: add(add(add(hc, mul(toeDir, 0.05)), mul(c.n, 0.021)), off), r: 0.006, alpha });
+  for (const [sh, el, hd, hc] of [[b.shL, eL, c.H, S3COL.glove], [b.shT, eT, TH, S3COL.skin]]) {
+    const sl = lerp3(sh, el, 0.5), wr = add(hd, mul(norm(sub(el, hd)), 0.055));
+    cap(sh, sl, 0.058, shirt, 0.054);
+    cap(sl, el, 0.042, S3COL.skin, 0.037); cap(el, wr, 0.037, S3COL.skin, 0.027);
+    cap(wr, add(hd, mul(c.s, 0.03)), 0.03, hc, 0.034);
+    cap(sub(hd, mul(c.s, 0.025)), add(hd, mul(c.s, 0.055)), 0.034, hc);
+  }
+  // club: tapered grip and shaft, hosel, then a shaped head (iron blade or driver crown)
+  const butt = sub(c.H, mul(c.s, 0.06)), gEnd = add(butt, mul(c.s, 0.27));
+  cap(butt, gEnd, 0.0135, S3COL.grip, 0.0105, 'club');
+  cap(gEnd, sub(c.head, mul(c.s, 0.06)), 0.0055, S3COL.shaft, 0.0036, 'club');
+  // head frame: the toe runs at the lie angle to the shaft (flat on the ground at address), the face looks along n
+  const hd = S3_CLUBS[P.club].head || S3_IRON_HEAD, lieA = (S3_CLUBS[P.club].addr ?? S3_CLUBS[P.club].lie) * D2R;
+  const toeDir = norm(add(mul(c.s, Math.cos(lieA)), mul(norm(cross(c.s, c.n)), Math.sin(lieA))));
+  let fUp = norm(cross(toeDir, c.n)); if (fUp.y < 0) fUp = mul(fUp, -1);
+  // the face is lofted; the body (driver crown and sole) sits in the unlofted frame n0/up0, so the crown stays level at address
+  const L = (CLUBS[P.club].loft + cal.dL) * D2R, n0 = norm(sub(mul(c.n, Math.cos(L)), mul(fUp, Math.sin(L)))), up0 = norm(cross(toeDir, n0));
+  const hc = add(c.head, V(0, hd.up, 0)), F = (u, v, w) => add(hc, add(add(mul(toeDir, u), mul(fUp, v)), mul(c.n, w)));
+  const B = (u, v, w) => add(hc, add(add(mul(toeDir, u), mul(up0, v)), mul(n0, w)));
+  // head parts sort together as one convex object: each carries the head centre (gz) and which side it sits on (ln), so the sides facing the camera draw last
+  // polygons are one-sided: they are skipped when their outward side (ln) faces away from the camera
+  const tag = (ln, f) => { const i = out.length; f(); for (let j = i; j < out.length; j++) Object.assign(out[j], { gz: add(hc, off), ln, cull: out[j].k === 'p' }); };
+  tag(mul(toeDir, -1), () => cap(sub(c.head, mul(c.s, 0.06)), F(-hd.heel * 0.6, hd.r * 0.2, -hd.r * 0.2), 0.0075, S3COL.shaft, 0.009, 'club'));   // hosel
+  if (S3_CLUBS[P.club].tee) {
+    // driver: deep pear-shaped body under a dark crown, flat face
+    const body = (v, sc) => { const pts = []; for (let i = 0; i <= 16; i++) { const a = i / 16 * Math.PI; pts.push(B(-hd.heel + (hd.heel + hd.toe) * (0.5 - 0.5 * Math.cos(a)), v, -Math.sin(a) * 0.105 * sc * (0.75 + 0.25 * Math.sin(a)))); } return pts; };
+    tag(V(0, 0, 0), () => cap(B(-hd.heel * 0.4, -hd.r * 0.05, -0.034), B(hd.toe * 0.62, -hd.r * 0.05, -0.04), hd.r * 1.0, S3COL.headDark, hd.r * 1.1, 'club'));
+    tag(up0, () => poly(body(hd.r * 1.0, 1), S3COL.crown, 'club'));
+    tag(mul(up0, -1), () => poly(body(-hd.r * 0.95, 0.95), S3COL.headDark, 'club'));
+    const fp = []; for (let i = 0; i <= 20; i++) { const a = i / 20 * 2 * Math.PI; fp.push(F((hd.toe - hd.heel) / 2 + Math.cos(a) * (hd.toe + hd.heel) * 0.5, Math.sin(a) * hd.r * (Math.sin(a) > 0 ? 1.0 : 0.95), 0.002)); }
+    tag(c.n, () => poly(fp, S3COL.head, 'club'));
+  } else {
+    // iron: blade outline (thin sole at the heel, rounded high toe), with a cavity back
+    const outline = w => [F(-hd.heel, hd.r * 0.55, w), F(-hd.heel, -hd.r, w), F(hd.toe * 0.6, -hd.r * 1.05, w), F(hd.toe * 0.95, -hd.r * 0.85, w), F(hd.toe * 1.08, -hd.r * 0.2, w),
+      F(hd.toe * 1.08, hd.r * 0.6, w), F(hd.toe * 0.95, hd.r * 1.35, w), F(hd.toe * 0.7, hd.r * 1.5, w), F(0, hd.r * 1.05, w)];
+    tag(mul(c.n, -1), () => poly(outline(-0.014), S3COL.headDark, 'club'));
+    tag(mul(fUp, -1), () => cap(F(-hd.heel * 0.8, -hd.r * 0.85, -0.007), F(hd.toe * 0.95, -hd.r * 0.8, -0.007), 0.009, S3COL.head, 0.01, 'club'));   // sole
+    tag(c.n, () => poly(outline(0.002), S3COL.head, 'club'));
+  }
+  out.push({ k: 'face', part: 'club', a: add(F(-hd.heel * 0.75, 0, 0.004), off), b: add(F(hd.toe * 0.9, 0, 0.004), off), r: hd.r * 0.14, alpha, gz: add(hc, off), ln: mul(c.n, 1.2) });
   return o.only ? out.filter(q => q.part === o.only) : out;
+}
+// ---- shaded drawing: key light from above and in front of the golfer, soft fill from the camera ----
+const S3_LIGHT = norm(V(0.35, 1, -0.55));
+const hexRGB = h => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const s3Lit = (rgb, n, toCam, k = 1) => {
+  const d = Math.max(0, dot(n, S3_LIGHT)), f = Math.max(0, dot(n, toCam)), hv = norm(add(S3_LIGHT, toCam)), sp = Math.pow(Math.max(0, dot(n, hv)), 16) * 22;
+  const I = (0.4 + 0.55 * d + 0.15 * f) * k;
+  return `rgb(${rgb.map(x => Math.round(clamp(x * I + sp, 0, 255)))})`;
+};
+// outline of a capsule with end radii ra, rb (px), traced in one rotational direction so many of them can be unioned
+function capPath(ctx, a, e, ra, rb) {
+  const dx = e[0] - a[0], dy = e[1] - a[1], d = Math.hypot(dx, dy);
+  if (d <= Math.abs(ra - rb) + 0.01) { const big = ra > rb ? [a, ra] : [e, rb]; ctx.moveTo(big[0][0] + big[1], big[0][1]); ctx.arc(big[0][0], big[0][1], big[1], 0, 2 * Math.PI); return; }
+  const th = Math.atan2(dy, dx), al = Math.acos(clamp((ra - rb) / d, -1, 1));
+  ctx.moveTo(a[0] + ra * Math.cos(th + al), a[1] + ra * Math.sin(th + al));
+  ctx.arc(a[0], a[1], ra, th + al, th + 2 * Math.PI - al);
+  ctx.arc(e[0], e[1], rb, th - al, th + al);
+  ctx.closePath();
+}
+// draw one primitive with Lambert + specular shading. P3 carries the camera basis; k dims distant parts slightly
+function s3DrawPrim(ctx, P3, it, k) {
+  const { q, a, e } = it, toCam = mul(P3.fwd, -1);
+  ctx.globalAlpha = q.alpha;
+  if (q.k === 'face') { if (q.ln && dot(q.ln, toCam) < 0 && q.alpha > 0.5) return; ctx.strokeStyle = COL.face; ctx.lineWidth = Math.max(2, 2 * q.r * P3.f / it.z); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); return; }
+  const rgb = hexRGB(q.col);
+  if (q.k === 'p') {
+    if (q.cull && dot(q.ln, toCam) < 0) return;
+    const sp = q.pts.map(P3); if (sp.some(p => !p)) return;
+    let n = norm(cross(sub(q.pts[1], q.pts[0]), sub(q.pts[Math.floor(q.pts.length / 2)], q.pts[0]))); if (dot(n, toCam) < 0) n = mul(n, -1);
+    ctx.fillStyle = s3Lit(rgb, n, toCam, k); ctx.beginPath(); sp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 0.6; ctx.stroke(); return;
+  }
+  if (q.k === 's') {
+    const R = Math.max(2, q.r * P3.f / a[2]), lx = dot(S3_LIGHT, P3.right), ly = -dot(S3_LIGHT, P3.up);
+    const g = ctx.createRadialGradient(a[0] + lx * R * 0.4, a[1] + ly * R * 0.4, R * 0.05, a[0], a[1], R);
+    g.addColorStop(0, s3Lit(rgb, norm(add(S3_LIGHT, toCam)), toCam, k)); g.addColorStop(0.7, s3Lit(rgb, toCam, toCam, k * 0.8)); g.addColorStop(1, s3Lit(rgb, mul(S3_LIGHT, -1), toCam, k));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(a[0], a[1], R, 0, 2 * Math.PI); ctx.fill(); return;
+  }
+  const ra = Math.max(0.7, q.r * P3.f / a[2]), rb = Math.max(0.7, q.r2 * P3.f / e[2]), R = Math.max(ra, rb);
+  // tube normals across the visible width: n(u) = u·e + √(1−u²)·w, e ⟂ axis in the screen plane, w ⟂ axis toward the camera
+  const ax = norm(sub(q.b, q.a)); let ex = cross(ax, P3.fwd); ex = len(ex) < 1e-4 ? P3.right : norm(ex);
+  let w = sub(toCam, mul(ax, dot(toCam, ax))); w = len(w) < 1e-4 ? toCam : norm(w);
+  const sx = dot(ex, P3.right), sy = -dot(ex, P3.up), sl = Math.hypot(sx, sy) || 1, mx = (a[0] + e[0]) / 2, my = (a[1] + e[1]) / 2;
+  ctx.beginPath(); capPath(ctx, a, e, ra, rb);
+  if (R < 1.6) ctx.fillStyle = s3Lit(rgb, w, toCam, k);
+  else {
+    const g = ctx.createLinearGradient(mx - sx / sl * R, my - sy / sl * R, mx + sx / sl * R, my + sy / sl * R);
+    for (const u of [-1, -0.7, -0.3, 0, 0.3, 0.7, 1]) g.addColorStop((u + 1) / 2, s3Lit(rgb, norm(add(mul(ex, u), mul(w, Math.sqrt(1 - u * u)))), toCam, k));
+    ctx.fillStyle = g;
+  }
+  ctx.fill();
 }
 function s3Phase(t, m) {
   return t < S3T.A ? 'Address' : t < S3T.top - 0.004 ? 'Backswing' : t <= S3T.top + 0.004 ? 'Top' : t < m.tImp - 0.004 ? 'Downswing' : t < m.tImp + 0.004 ? 'Impact' : t < S3T.top + S3T.ds ? 'Follow-through' : 'Finish';
@@ -2489,8 +2594,13 @@ function s3Draw() {
   if (s3CmpRes) figs.push({ r: s3CmpRes, off: V(side ? S3_SIDE : 0, 0, 0), tint: S3CMP, alpha: side ? 1 : 0.3, trace: S3CMP,
     name: s3CmpSel === 'snap' ? 'Snapshot' : S3_PRESETS[s3CmpSel].name });
   // ground
-  ctx.fillStyle = '#0f1a14'; ctx.fillRect(0, 0, w, h);
+  const sky = ctx.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#16201b'); sky.addColorStop(1, '#0c1510');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
   const gx = side ? 4.5 : 3;
+  // turf: a lit patch around the golfer that fades out
+  const gc = P3(V(0, 0, -0.4));
+  if (gc) { const R = 3.2 * P3.f / gc[2], g = ctx.createRadialGradient(gc[0], gc[1], 0, gc[0], gc[1], R * 1.4); g.addColorStop(0, 'rgba(95,211,154,0.11)'); g.addColorStop(1, 'rgba(95,211,154,0)');
+    const gp = [V(-gx, 0, -2.5), V(gx, 0, -2.5), V(gx, 0, 2), V(-gx, 0, 2)].map(P3); if (gp.every(Boolean)) { ctx.fillStyle = g; ctx.beginPath(); gp.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.fill(); } }
   for (let i = -gx; i <= gx; i += 0.5) line(ctx, [P3(V(i, 0, -2.5)), P3(V(i, 0, 2))], 'rgba(255,255,255,0.05)', 1);
   for (let j = -2.5; j <= 2; j += 0.5) line(ctx, [P3(V(-gx, 0, j)), P3(V(gx, 0, j))], 'rgba(255,255,255,0.05)', 1);
   line(ctx, [P3(V(-gx, 0, 0)), P3(V(gx, 0, 0))], 'rgba(228,235,231,0.45)', 1.5);
@@ -2498,7 +2608,8 @@ function s3Draw() {
   const items = [];
   for (const [fi, f] of figs.entries()) {
     const { m, trace, fl, P, cal } = f.r, o = f.off, IN_ = 0.0254;
-    line(ctx, [P3(add(V(-1.2, 0, -0.62), o)), P3(add(V(1.2, 0, -0.62), o))], 'rgba(228,235,231,0.12)', 1, [4, 4]);
+    const tz = -0.62 + (S3_CLUBS[P.club].stance?.dz || 0);   // toe line
+    line(ctx, [P3(add(V(-1.2, 0, tz), o)), P3(add(V(1.2, 0, tz), o))], 'rgba(228,235,231,0.12)', 1, [4, 4]);
     const lpG = P3(add(V(m.lp, 0, 0), o));
     if (lpG) { dot2(ctx, lpG, 4, fi ? S3CMP : COL.low); if (fi === 0 || side) label(ctx, `low point ${fmtSigned(m.lp / IN_)} in`, lpG[0] + 8, lpG[1] + 14 + (fi && !side ? 18 : 0), fi ? S3CMP : COL.low); }
     if (s3Opt.hands) line(ctx, trace.map(q => P3(add(q.H, o))), fi ? 'rgba(180,140,255,0.4)' : 'rgba(228,235,231,0.35)', 1.2, [4, 4]);
@@ -2507,17 +2618,25 @@ function s3Draw() {
       line(ctx, trace.filter(q => q.t <= t).map(q => P3(add(q.head, o))), f.trace, 2.2);
     }
     // ball: on the ground until impact, then launched along the measured start direction
-    let bp = V(0, BALL_R, 0);
-    if (t > m.tImp) { const dt = t - m.tImp, la = fl.vla * D2R, ha = fl.hla * D2R, d = fl.ballMph * 0.447 * dt; bp = V(d * Math.cos(la) * Math.cos(ha), BALL_R + d * Math.sin(la), d * Math.cos(la) * Math.sin(ha)); }
+    const by = CLUBS[P.club].ballBottom + BALL_R;   // teed up for the driver
+    if (by > BALL_R + 0.005) { const a = P3(o), e = P3(add(V(0, by - BALL_R, 0), o)); if (a && e) line(ctx, [a, e], '#d9c7a0', Math.max(1.5, 0.006 * P3.f / a[2])); }
+    let bp = V(0, by, 0);
+    if (t > m.tImp) { const dt = t - m.tImp, la = fl.vla * D2R, ha = fl.hla * D2R, d = fl.ballMph * 0.447 * dt; bp = V(d * Math.cos(la) * Math.cos(ha), by + d * Math.sin(la), d * Math.cos(la) * Math.sin(ha)); }
     if (fi === 0 || side) { const q = P3(add(bp, o)); if (q) items.push({ ball: true, a: q, z: q[2] }); }
     const prims = s3Prims(t, P, cal, { off: o, tint: f.tint, alpha: f.alpha });
-    // shadows
-    ctx.save(); ctx.globalAlpha = 0.18 * f.alpha; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
-    for (const q of prims) if (q.k === 'c') { const a = P3(V(q.a.x, 0, q.a.z)), e = P3(V(q.b.x, 0, q.b.z)); if (a && e) { ctx.lineWidth = Math.max(1, 2 * q.r * P3.f / a[2]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); } }
-    ctx.restore();
+    // soft shadow: every part dropped straight down onto the ground (light overhead), unioned into one path and blurred
+    ctx.save(); ctx.globalAlpha = 0.32 * f.alpha; ctx.fillStyle = '#000'; ctx.filter = 'blur(3px)'; ctx.beginPath();
+    for (const q of prims) {
+      if (q.k === 'c' || q.k === 's') { const a = P3(V(q.a.x, 0, q.a.z)), e = P3(V((q.b || q.a).x, 0, (q.b || q.a).z)); if (a && e) capPath(ctx, a, e, q.r * P3.f / a[2], (q.r2 ?? q.r) * P3.f / e[2]); }
+    }
+    ctx.fill(); ctx.restore();
     if (s3Opt.ghost && fi === 0 && Math.abs(t - m.tImp) > 0.01) prims.push(...s3Prims(m.tImp, P, cal, { off: o, alpha: 0.22, only: 'club' }));
     // overlay: the ghost is drawn as its own pass on top, so both figures stay readable
-    for (const q of prims) { const a = P3(q.a), e = q.b ? P3(q.b) : a; if (a && e) items.push({ q, a, e, z: (a[2] + e[2]) / 2, pass: side ? 0 : fi }); }
+    for (const q of prims) {
+      const gz = q.gz && P3(q.gz), gzv = gz && gz[2] - dot(q.ln, mul(P3.fwd, -1)) * 1e-3;
+      if (q.k === 'p') { const zs = q.pts.map(P3); if (zs.every(Boolean)) items.push({ q, z: gz ? gzv : zs.reduce((s, p) => s + p[2], 0) / zs.length, pass: side ? 0 : fi }); continue; }
+      const a = P3(q.a), e = q.b ? P3(q.b) : a; if (a && e) items.push({ q, a, e, z: gz ? gzv : (a[2] + e[2]) / 2, pass: side ? 0 : fi });
+    }
     if (side) { const hp = P3(add(V(-0.1, 2.15, -0.6), o)); if (hp) label(ctx, f.name, hp[0], hp[1], fi ? S3CMP : COL.text, 'center'); }
   }
   // depth-sorted figures
@@ -2525,14 +2644,8 @@ function s3Draw() {
   items.sort((x, y) => (x.pass || 0) - (y.pass || 0) || y.z - x.z);
   ctx.save(); ctx.lineCap = 'round';
   for (const it of items) {
-    if (it.ball) { ctx.globalAlpha = 1; ctx.fillStyle = '#f4f6f5'; ctx.beginPath(); ctx.arc(it.a[0], it.a[1], Math.max(2.5, BALL_R * P3.f / it.a[2]), 0, 7); ctx.fill(); continue; }
-    const { q, a, e, z } = it, k = 1.08 - 0.3 * (z - zMin) / Math.max(0.01, zMax - zMin);
-    ctx.globalAlpha = q.alpha;
-    if (q.k === 'face') { ctx.strokeStyle = COL.face; ctx.lineWidth = Math.max(2, 2 * q.r * P3.f / z); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); continue; }
-    const px = Math.max(q.k === 's' ? 2 : 1.2, (q.k === 's' ? 1 : 2) * q.r * P3.f / z);
-    ctx.strokeStyle = ctx.fillStyle = shade(q.col, k);
-    if (q.k === 's') { ctx.beginPath(); ctx.arc(a[0], a[1], px, 0, 7); ctx.fill(); }
-    else { ctx.lineWidth = px; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(e[0], e[1]); ctx.stroke(); }
+    if (it.ball) { s3DrawPrim(ctx, P3, { q: { k: 's', r: Math.max(BALL_R, 2.5 * it.a[2] / P3.f), col: '#f4f6f5', alpha: 1 }, a: it.a }, 1.05); continue; }
+    s3DrawPrim(ctx, P3, it, 1.05 - 0.2 * (it.z - zMin) / Math.max(0.01, zMax - zMin));
   }
   ctx.restore();
   // shoulder plane: the disc the shoulders turn in (perpendicular to the upper spine)
@@ -2607,7 +2720,11 @@ function s3Init() {
 // Shapes and tracked points are stored in video pixel coordinates so they survive resizing.
 // =====================================================================
 const AZ_TOOLS = [['select', 'Select'], ['line', 'Line'], ['angle', 'Angle (3 clicks)'], ['vert', '∠ vertical'], ['horz', '∠ horizontal'], ['circle', 'Circle'], ['box', 'Box'], ['free', 'Draw'], ['point', 'Track point'], ['scale', 'Set scale']];
-const AZ_CP = [['address', 'Address'], ['top', 'Top'], ['p6', 'P6'], ['impact', 'Impact'], ['finish', 'Finish']];
+// P-system positions: [key, short label, name]. Keys for P1, P4, P6, P7 and P10 stay as they were (address, top, p6, impact, finish).
+const AZ_CP = [['address', 'P1', 'Address'], ['p2', 'P2', 'Shaft parallel, backswing'], ['p3', 'P3', 'Lead arm parallel, backswing'], ['top', 'P4', 'Top'],
+  ['p5', 'P5', 'Lead arm parallel, downswing'], ['p6', 'P6', 'Shaft parallel, downswing'], ['impact', 'P7', 'Impact'], ['p8', 'P8', 'Shaft parallel, follow-through'],
+  ['p9', 'P9', 'Trail arm parallel, follow-through'], ['finish', 'P10', 'Finish']];
+const azCpName = k => { const c = AZ_CP.find(c => c[0] === k); return c ? `${c[1]} ${c[2]}` : k; };
 const AZ_PTS = [['head', 'Head'], ['shL', 'Lead shoulder'], ['shT', 'Trail shoulder'], ['hipL', 'Lead hip'], ['hipT', 'Trail hip'], ['hands', 'Hands'], ['club', 'Clubhead']];
 const AZ_COLORS = ['#ffd45c', '#ff5c7a', '#4aa8ff', '#5fd39a', '#b48cff', '#ffffff'];
 const az = { skel: true, tool: 'line', color: '#ffd45c', scope: 'all', fps: 30, compare: false, active: 0, ptName: 'head', draft: null, sel: null, drag: null, panes: [], raf: 0, off: 0, playing: null, scrubP: -1, started: false, msg: '' };
@@ -2691,9 +2808,19 @@ function azDrawPane(p) {
   if (here.shL && here.shT) line(ctx, [azToS(p, here.shT), azToS(p, here.shL)], 'rgba(95,211,154,0.6)', 1.5);
   if (here.hipL && here.hipT) line(ctx, [azToS(p, here.hipT), azToS(p, here.hipL)], 'rgba(95,211,154,0.6)', 1.5);
   if (here.hands && here.club) line(ctx, [azToS(p, here.hands), azToS(p, here.club)], 'rgba(95,211,154,0.6)', 1.5);
+  const rel = azArmShaftQ(here, p.dir);
+  if (rel != null) {   // lead arm–shaft angle at the hands
+    const H = azToS(p, here.hands), Sh = azToS(p, here.shL), C = azToS(p, here.club);
+    line(ctx, [Sh, H], 'rgba(255,212,92,0.75)', 1.5, [4, 3]);
+    const a1 = Math.atan2(Sh[1] - H[1], Sh[0] - H[0]), a2 = Math.atan2(C[1] - H[1], C[0] - H[0]);
+    let dA = a2 - a1; while (dA > Math.PI) dA -= 2 * Math.PI; while (dA <= -Math.PI) dA += 2 * Math.PI;
+    const ccw = rel <= 180 ? dA < 0 : dA > 0, sweep = rel <= 180 ? dA : dA - Math.sign(dA) * 2 * Math.PI, mid = a1 + sweep / 2;
+    ctx.save(); ctx.strokeStyle = COL.start; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(H[0], H[1], 22, a1, a2, ccw); ctx.stroke(); ctx.restore();
+    label(ctx, `${rel.toFixed(0)}°`, H[0] + Math.cos(mid) * 40, H[1] + Math.sin(mid) * 40 + 4, COL.start, 'center');
+  }
   // status
   const fr = Math.round(t * az.fps);
-  label(ctx, `${p.i ? 'B' : 'A'} · ${t.toFixed(3)} s · frame ${fr}${cp ? ' · ' + AZ_CP.find(c => c[0] === cp)[1] : ''}`, 10, 16, COL.text);
+  label(ctx, `${p.i ? 'B' : 'A'} · ${t.toFixed(3)} s · frame ${fr}${cp ? ' · ' + azCpName(cp) : ''}`, 10, 16, COL.text);
   if (az.compare && az.active === p.i) { ctx.save(); ctx.strokeStyle = COL.accent; ctx.lineWidth = 2; ctx.strokeRect(1, 1, p.cv.clientWidth - 2, p.cv.clientHeight - 2); ctx.restore(); }
 }
 function azDraw() {
@@ -2715,10 +2842,14 @@ function azMarks() {
   // line up with the main scrub bar: the thumb centre runs from half a thumb in from each end of the slider
   const sl = document.getElementById('azT').getBoundingClientRect(), x0 = sl.left - cv.getBoundingClientRect().left, TH = 16;
   const X = t => x0 + TH / 2 + clamp(t / azDur(A), 0, 1) * (sl.width - TH), off = azOffset();
-  az.marks = [];
+  az.marks = []; const lab = [];
   for (const [pi, p] of az.panes.entries()) { if (!p.video || (pi && !az.compare)) continue;
     for (const [k, nm] of AZ_CP) if (p.cps[k] != null) { const x = X(p.cps[k] + (pi ? off : 0)); az.marks.push({ x, t: p.cps[k] + (pi ? off : 0) }); line(ctx, [[x, pi ? 12 : 2], [x, pi ? 22 : 12]], pi ? COL.plane : COL.accent, 2);
-      ctx.save(); ctx.font = '10px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center'; ctx.fillText(nm, x, pi ? 32 : 32 - 0); ctx.restore(); } }
+      if (!pi) lab.push([x, nm]); } }
+  ctx.save(); ctx.font = '10px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+  let last = -1e9, row = 0;   // close labels (P6/P7) alternate between two rows
+  for (const [x, nm] of lab.sort((a, b) => a[0] - b[0])) { row = x - last < 22 ? 1 - row : 0; ctx.fillText(nm, x, 32 + row * 11); last = x; }
+  ctx.restore();
 }
 
 // ---- measurements ----
@@ -2728,6 +2859,31 @@ const azTilt = (L, Tr) => (L && Tr) ? Math.atan2(Tr.y - L.y, Math.abs(Tr.x - L.x
 const azMv = (p, k, cp, axis) => { const a = p.pts.address && p.pts.address[k], b = p.pts[cp] && p.pts[cp][k]; if (!a || !b || !p.scale) return null;
   return axis === 'x' ? (b.x - a.x) * p.dir * p.scale : (a.y - b.y) * p.scale; };
 const azLean = (p, cp) => { const q = p.pts[cp]; return q && q.hands && q.club ? Math.atan2((q.hands.x - q.club.x) * p.dir, q.club.y - q.hands.y) * R2D : null; };
+// release: the angle at the hands between the lead arm (to the lead shoulder) and the shaft (to the clubhead).
+// 180° = arm and shaft in line; under 180 = still hinged (club on the trail side of the arm line); over 180 = clubhead past the arm line (flip)
+function azArmShaftQ(q, dir) {
+  if (!q || !q.shL || !q.hands || !q.club) return null;
+  const A = { x: q.shL.x - q.hands.x, y: q.shL.y - q.hands.y }, S = { x: q.club.x - q.hands.x, y: q.club.y - q.hands.y };
+  const ang = Math.acos(clamp((A.x * S.x + A.y * S.y) / (Math.hypot(A.x, A.y) * Math.hypot(S.x, S.y) || 1), -1, 1)) * R2D;
+  return (-A.x * S.y + A.y * S.x) * dir >= 0 ? ang : 360 - ang;   // cross of (hands − shoulder) × shaft, signed toward the target
+}
+const azArmShaft = (p, cp) => azArmShaftQ(p.pts[cp], p.dir);
+// hand speed from body tracking: [t, mph] per tracked frame. Uses the set scale, else a body-size estimate.
+function azHandSpeed(p) {
+  if (!p.pose) return null;
+  const T = p.pose.times, B = p.pose.frames.map(azBody), sc = azBenchScale(p); if (!sc) return null;
+  const raw = T.map((t, i) => { const a = B[i - 1], b = B[i + 1]; if (!a || !b || !B[i]) return null;
+    return Math.hypot(b.hands.x - a.hands.x, b.hands.y - a.hands.y) / (T[i + 1] - T[i - 1]) / sc.k * 0.0568182; });   // px/s → in/s → mph
+  return T.map((t, i) => { let v = 0, n = 0; for (let j = i - 2; j <= i + 2; j++) if (raw[j] != null) { v += raw[j]; n++; } return raw[i] == null || !n ? null : [t, v / n]; });
+}
+// when the hands peak between the top and impact: ms before impact (+) and the impact speed as a share of the peak
+function azHandPeak(p) {
+  const c = p.cps; if (c.top == null || c.impact == null) return null;
+  const d = azHandSpeed(p); if (!d) return null;
+  const win = d.filter(q => q && q[0] >= c.top && q[0] <= c.impact + 0.03); if (win.length < 4) return null;
+  const pk = win.reduce((a, b) => b[1] > a[1] ? b : a), im = d.filter(Boolean).reduce((a, b) => Math.abs(b[0] - c.impact) < Math.abs(a[0] - c.impact) ? b : a);
+  return { ms: (c.impact - pk[0]) * 1000, t: pk[0], v: pk[1], share: im[1] / pk[1] };
+}
 const AZ_REF = [
   { id: 'tiltA', name: 'Shoulder tilt at address', cp: 'address', u: '°', r: [2, 12], f: p => azTilt(p.pts.address?.shL, p.pts.address?.shT),
     lo: 'Lead shoulder low or level at setup: often from the ball too far forward or the trail hand not under.', hi: 'Lots of tilt away at setup: can encourage hanging back.' },
@@ -2753,6 +2909,12 @@ const AZ_REF = [
     lo: 'Shaft leans away from the target at setup.', hi: 'Lots of forward press: fine if it matches impact.' },
   { id: 'leanI', name: 'Shaft lean at impact', cp: 'impact', u: '°', r: [4, 14], f: p => azLean(p, 'impact'),
     lo: 'Little or backward shaft lean: the hands flipped. Adds loft and moves the low point back.', hi: 'Very strong lean: delofted, can come out low.' },
+  { id: 'armP6', name: 'Lead arm–shaft angle at P6', cp: 'p6', u: '°', abs: true, r: [80, 120], f: p => azArmShaft(p, 'p6'),
+    lo: 'Very sharp angle: a lot of lag held late. Fine if the hands still lead at impact; if not, the face is often left open.', hi: 'The angle is already opening: an early release (casting). The club speed is spent before the ball.' },
+  { id: 'armI', name: 'Lead arm–shaft angle at impact', cp: 'impact', u: '°', abs: true, r: [160, 180], f: p => azArmShaft(p, 'impact'),
+    lo: 'Still well hinged at impact: a held-off release. Delofted, often low and right.', hi: 'Over 180°: the clubhead has passed the lead arm line, a flip. Adds loft and moves the low point back.' },
+  { id: 'hsPeak', name: 'Hand speed peaks before impact', cp: 'impact', u: 'ms', abs: true, r: [20, 70], fps: 100, f: p => azHandPeak(p)?.ms,
+    lo: 'The hands are still speeding up into the ball: the club is not releasing past them (held off, or all arms).', hi: 'The hands peak early and slow down well before the ball: the club released early (casting).' },
 ];
 // patterns: combinations of flags that point at one story
 const AZ_PATTERNS = [
@@ -2760,6 +2922,8 @@ const AZ_PATTERNS = [
   { when: s => (s.shLy === 'lo' || s.headY === 'lo') && s.tiltI !== 'lo', text: '<b>Dipping.</b> The head or lead shoulder drops toward the ball in the downswing, which sends the club deeper.' },
   { when: s => s.hipL === 'lo' && (s.leanI === 'lo' || s.handsX === 'lo'), text: '<b>Stall and flip.</b> The hips do not get toward the target and the hands throw the club to catch up.' },
   { when: s => s.headY === 'hi' || s.shLy === 'hi', text: '<b>Standing up.</b> The body rises through impact: thin and heel strikes, often with an open face.' },
+  { when: s => (s.armP6 === 'hi' || s.hsPeak === 'hi') && (s.armI === 'hi' || s.leanI === 'lo'), text: '<b>Casting.</b> The wrist hinge is thrown out early in the downswing, so the clubhead passes the hands by impact. Feel the hands keep moving toward the target with the hinge held until the hands pass the trail thigh.' },
+  { when: s => s.armI === 'lo' && s.hsPeak !== 'hi', text: '<b>Held-off release.</b> The hinge is still there at impact and the hands lead hard. Usually low and right; let the club release so the arm and shaft line up at the ball.' },
   { when: s => s.hipT === 'lo' || s.headXT === 'lo', text: '<b>Sway.</b> The body slides away from the target in the backswing, so it has further to get back.' },
   { when: s => s.hipT === 'hi' || s.headXT === 'hi', text: '<b>Reverse pivot.</b> The body moves toward the target in the backswing, then has to fall back.' },
 ];
@@ -2767,11 +2931,12 @@ function azReport(p) {
   const rows = [], state = {};
   for (const c of AZ_REF) {
     if (p.cps[c.cp] == null) continue;
+    if (c.fps && az.fps < c.fps && c.f(p) != null) { rows.push(`<tr class="na"><td>${c.name}</td><td colspan="3">needs slow-motion video (${c.fps}+ fps, set the frame rate above)</td></tr>`); continue; }
     const v = c.f(p);
     if (v == null) { if (c.u === 'in' && !p.scale && p.pts[c.cp]) rows.push(`<tr class="na"><td>${c.name}</td><td colspan="3">set a scale to measure this</td></tr>`); continue; }
     const st = v < c.r[0] ? 'lo' : v > c.r[1] ? 'hi' : 'ok'; state[c.id] = st;
-    const fmt = x => fmtSigned(x, 1) + (c.u === '°' ? '°' : ' in');
-    rows.push(`<tr class="${st}"><td>${c.name}</td><td><b>${fmt(v)}</b></td><td style="white-space:nowrap">${fmtSigned(c.r[0], 0)} to ${fmtSigned(c.r[1], 0)}${c.u === '°' ? '°' : ' in'}</td><td>${st === 'ok' ? '✓ in range' : (st === 'lo' ? '▼ ' + c.lo : '▲ ' + c.hi)}</td></tr>`);
+    const un = c.u === '°' ? '°' : ' ' + c.u, fmt = x => (c.abs ? x.toFixed(0) : fmtSigned(x, 1)) + un;
+    rows.push(`<tr class="${st}"><td>${c.name}</td><td><b>${fmt(v)}</b></td><td style="white-space:nowrap">${c.abs ? c.r[0] : fmtSigned(c.r[0], 0)} to ${c.abs ? c.r[1] : fmtSigned(c.r[1], 0)}${un}</td><td>${st === 'ok' ? '✓ in range' : (st === 'lo' ? '▼ ' + c.lo : '▲ ' + c.hi)}</td></tr>`);
   }
   if (!rows.length) return '';
   const pats = AZ_PATTERNS.filter(x => x.when(state)).map(x => `<li>${x.text}</li>`);
@@ -2875,6 +3040,7 @@ const AZ_SERIES = {
   hipX: { name: 'Hip centre toward target', u: 'len', f: (b, a, p) => (b.hipC.x - a.hipC.x) * p.dir },
   hipTilt: { name: 'Hip tilt (lead side up +)', u: '°', f: b => azTilt(b.hipL, b.hipT) },
   handsY: { name: 'Hand height (up +)', u: 'len', f: (b, a) => a.hands.y - b.hands.y },
+  handV: { name: 'Hand speed', u: 'mph', speed: true },
 };
 // Approximate tour benchmark (face-on, mid iron) at address, top, impact, finish. Lengths in inches from address, angles in degrees.
 // null = not meaningful from a face-on camera at that position (e.g. shoulder tilt with the shoulders turned away).
@@ -2891,7 +3057,29 @@ function azBenchScale(p) {
   return { k: Math.abs(ank - head.y) / 55, est: true };                         // px per inch
 }
 // benchmark curve stretched to the pane's checkpoint times (needs address, top and impact)
+// Approximate tour hand speed (mph, mid iron) at each P position, plus the downswing peak about 35 ms before impact.
+// Positions not set by hand are placed at typical fractions of the backswing (P1→P4), downswing (P4→P7) and follow-through (P7→P10).
+const AZ_BENCH_HV = [['address', 0, 0, 0], ['p2', 5, 0, 0.35], ['p3', 6.5, 0, 0.65], ['top', 1.5, 1, 0], ['p5', 15, 1, 0.55], ['p6', 21, 1, 0.8],
+  ['peak', 22.5], ['impact', 19.5, 2, 0], ['p8', 13, 2, 0.15], ['p9', 8, 2, 0.3], ['finish', 0, 3, 0]];
+function azBenchSpeed(p) {
+  const c = p.cps; if (c.address == null || c.top == null || c.impact == null) return null;
+  const fin = c.finish ?? Math.min(azDur(p), c.impact + (c.impact - c.top) * 2), seg = [c.address, c.top, c.impact, fin];
+  const kn = AZ_BENCH_HV.map(([k, v, s0, f]) => [k === 'peak' ? c.impact - 0.035 : c[k] ?? seg[s0] + (seg[s0 + 1] - seg[s0]) * f, v, k]);
+  for (let i = 1; i < kn.length; i++) if (kn[i][0] <= kn[i - 1][0]) kn[i][0] = kn[i - 1][0] + 0.004;   // keep the knots in time order
+  // monotone cubic through the knots, so the curve has no overshoot
+  const n = kn.length, dx = [], m = [], sl = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = kn[i + 1][0] - kn[i][0]; sl[i] = (kn[i + 1][1] - kn[i][1]) / dx[i]; }
+  m[0] = sl[0]; m[n - 1] = sl[n - 2];
+  for (let i = 1; i < n - 1; i++) m[i] = sl[i - 1] * sl[i] <= 0 ? 0 : 3 * (dx[i - 1] + dx[i]) / ((2 * dx[i] + dx[i - 1]) / sl[i - 1] + (dx[i] + 2 * dx[i - 1]) / sl[i]);
+  const out = [[0, 0]];
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < 16; k++) { const u = k / 16, h = dx[i], u2 = u * u, u3 = u2 * u;
+    out.push([kn[i][0] + u * h, Math.max(0, (2 * u3 - 3 * u2 + 1) * kn[i][1] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * kn[i + 1][1] + (u3 - u2) * h * m[i + 1])]); }
+  out.push(kn[n - 1].slice(0, 2));
+  out.keys = kn.filter(q => q[2] === 'peak' || q[2] in c && c[q[2]] != null).map(q => q.slice(0, 2));   // diamonds at your set positions and the peak
+  return out;
+}
 function azBenchData(p, key) {
+  if (AZ_SERIES[key].speed) return azBenchSpeed(p);
   const v = AZ_BENCH[key], c = p.cps, S = AZ_SERIES[key];
   if (!v || c.address == null || c.top == null || c.impact == null) return null;
   const fin = c.finish ?? Math.min(azDur(p), c.impact + (c.impact - c.top) * 2);
@@ -2910,6 +3098,7 @@ function azBenchData(p, key) {
 }
 function azSeriesData(p, key) {
   if (!p.pose) return null;
+  if (AZ_SERIES[key].speed) return azHandSpeed(p);
   const S = AZ_SERIES[key], fr = p.pose.frames, T = p.pose.times;
   const bi = p.cps.address != null ? T.findIndex(t => t >= p.cps.address - 1e-3) : fr.findIndex(Boolean);
   const base = azBody(fr[Math.max(0, bi)] || fr.find(Boolean)); if (!base) return null;
@@ -2926,23 +3115,30 @@ function azChart() {
   ctx.font = '11px -apple-system,sans-serif'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
   for (const v of [lo, (lo + hi) / 2, hi]) { line(ctx, [[46, Y(v)], [w - 14, Y(v)]], 'rgba(255,255,255,0.06)', 1); ctx.fillText(v.toFixed(1), 40, Y(v) + 4); }
   line(ctx, [[46, Y(0)], [w - 14, Y(0)]], 'rgba(255,255,255,0.25)', 1);
-  for (const [k, nm] of AZ_CP) if (A.cps[k] != null) { const x = X(A.cps[k]); line(ctx, [[x, 10], [x, h - 24]], 'rgba(95,211,154,0.35)', 1, [3, 3]); ctx.textAlign = 'center'; ctx.fillStyle = COL.muted; ctx.fillText(nm, x, h - 10); }
+  { let last = -1e9, row = 0;
+    for (const [x, nm] of AZ_CP.filter(([k]) => A.cps[k] != null).map(([k, nm]) => [X(A.cps[k]), nm]).sort((a, b) => a[0] - b[0])) {
+      line(ctx, [[x, 10], [x, h - 24]], 'rgba(95,211,154,0.35)', 1, [3, 3]); row = x - last < 22 ? 1 - row : 0; last = x;
+      ctx.textAlign = 'center'; ctx.fillStyle = COL.muted; ctx.fillText(nm, x, h - 10 - row * 11); } }
   if (bench) { line(ctx, bench.map(q => q ? [X(q[0]), Y(q[1])] : null), COL.start, 2, [6, 4]);
     for (const [t, v] of bench.keys) { const x = X(t), y = Y(v); ctx.save(); ctx.fillStyle = COL.start; ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y); ctx.fill(); ctx.restore(); } }
   for (const s of sets) {
     const pts = s.d.map(q => q ? [X(q[0] + s.off), Y(q[1])] : null);
     line(ctx, pts, s.p.i ? COL.plane : COL.accent, 2);
+    const pk = S.speed && azHandPeak(s.p);   // mark the peak and how long before impact it came
+    if (pk) { const x = X(pk.t + s.off), y = Y(pk.v); dot2(ctx, [x, y], 4.5, s.p.i ? COL.plane : COL.accent);
+      label(ctx, `peak ${pk.v.toFixed(0)} mph · ${pk.ms.toFixed(0)} ms before impact`, x + 8, y - 8 + s.p.i * 16, COL.text, 'left'); }
   }
   const tx = X(azT(A)); line(ctx, [[tx, 10], [tx, h - 24]], COL.text, 1.5);
   ctx.textAlign = 'left'; ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system,sans-serif';
-  ctx.fillText(`${S.name} · ${S.u === 'len' ? azUnit(A) : '°'}${S.u === 'len' ? ', from address' : ''}`, 50, 12);
+  ctx.fillText(`${S.name} · ${S.u === 'len' ? azUnit(A) : S.u}${S.u === 'len' ? ', from address' : ''}`, 50, 12);
   // legend
   const lg = [['You' + (sets.length > 1 ? ' (A)' : ''), COL.accent], ...(sets.length > 1 ? [['B', COL.plane]] : []), ...(bench ? [['Tour (approx.)', COL.start]] : [])];
   ctx.font = '11px -apple-system,sans-serif'; let lx = w - 14; ctx.textAlign = 'right';
   for (const [t, c] of lg.reverse()) { ctx.fillStyle = COL.text; ctx.fillText(t, lx, 12); lx -= ctx.measureText(t).width + 6; line(ctx, [[lx - 14, 8], [lx, 8]], c, 2, c === COL.start ? [4, 3] : null); lx -= 24; }
   const note = document.getElementById('azBenchNote');
   if (note) { const sc = S.u === 'len' && azBenchScale(A);
-    note.textContent = AZ_BENCH[key] && !bench ? 'Set address, top and impact checkpoints to see the tour benchmark.'
+    note.textContent = S.speed ? `Hand speed from body tracking (middle of the wrists). In a good release the hands peak just before impact and slow down as the club whips past them; hands still speeding up at impact point to a held-off release, an early peak to casting.${bench ? ' Tour line: approximate tour hand speed with a mid iron (about 22 mph at the peak, 35 ms before impact), stretched to your P positions. A shape guide, not exact data.' : ' Set P1, P4 and P7 to see the tour line.'}${A.scale ? '' : ' Speeds are scaled from your body size; set a scale for better numbers.'}${az.fps < 100 ? ' Timing needs slow-motion video (120 fps or more).' : ''}`
+      : AZ_BENCH[key] && !bench ? 'Set P1, P4 and P7 (address, top, impact) to see the tour benchmark.'
       : bench ? `Tour line: approximate tour values at address, top, impact and finish, joined smoothly and stretched to your checkpoint times. A shape guide, not exact data.${sc && sc.est ? ' Distances are scaled from your body size; set a scale for better numbers.' : ''}${AZ_BENCH[key].includes(null) ? ' Shown only where a face-on camera can measure it.' : ''}` : ''; }
   az.chartX = { X, dur };
 }
@@ -2961,9 +3157,18 @@ function azAutoCps() {
   // sanity: a swing has the hands above the shoulders at the top, and top < impact < finish
   const shY = (B[top].shL.y + B[top].shT.y) / 2;
   if (!(addr < top && top < imp && imp <= fin) || H(top) > shY) { st.textContent = "Couldn't find a swing in the hand motion. Set the checkpoints by hand (scrub and press Set)."; return; }
-  let p6 = null; const hipY = B[addr].hipC.y; for (const i of idx) if (i > top && i < imp && H(i) >= hipY - ht * 0.1) { p6 = i; break; }
-  Object.assign(p.cps, { address: T[addr], top: T[top], impact: T[imp], finish: T[fin] }); if (p6 != null) p.cps.p6 = T[p6];
-  st.textContent = 'Checkpoints placed from the hand path. Check them and nudge any that are off (go to the frame and press Set).';
+  // in-between positions from the hands and arms: hands at hip height ≈ shaft parallel (P2, P6, P8); wrist level with its shoulder ≈ arm parallel (P3, P5, P9)
+  const hipY = B[addr].hipC.y, F = i => p.pose.frames[i], wy = (i, k) => F(i)[AZ_LM[k]].y;
+  const first = (a, b, f) => idx.find(i => i > a && i < b && f(i)) ?? null;
+  const p2 = first(addr, top, i => H(i) <= hipY - ht * 0.1);
+  const p3 = first(p2 ?? addr, top, i => wy(i, 'wrL') <= wy(i, 'shL'));
+  const p5 = first(top, imp, i => wy(i, 'wrL') >= wy(i, 'shL'));
+  const p6 = first(p5 ?? top, imp, i => H(i) >= hipY - ht * 0.1);
+  const p8 = first(imp, fin, i => H(i) <= hipY - ht * 0.1);
+  const p9 = first(p8 ?? imp, fin + 1, i => wy(i, 'wrT') <= wy(i, 'shT'));
+  Object.assign(p.cps, { address: T[addr], top: T[top], impact: T[imp], finish: T[fin] });
+  for (const [k, i] of Object.entries({ p2, p3, p5, p6, p8, p9 })) if (i != null) p.cps[k] = T[i];
+  st.textContent = 'P1–P10 placed from the hand and arm path (the shaft positions are estimated from hand height, since the club is not tracked). Check them and nudge any that are off (go to the frame and press Set).';
   azSyncSide(); if (az.compare) azSeekPane(p, T[imp]); else azSetTime(T[imp]); azDraw();
 }
 // copy tracked body points into the checkpoint track points (the clubhead stays manual)
@@ -2972,7 +3177,7 @@ function azFillPts() {
   let n = 0;
   for (const [k] of AZ_CP) { if (p.cps[k] == null) continue; const b = azBody(azPoseAt(p, p.cps[k])); if (!b) continue;
     const q = p.pts[k] = p.pts[k] || {}; for (const nm of ['head', 'shL', 'shT', 'hipL', 'hipT', 'hands']) q[nm] = { x: b[nm].x, y: b[nm].y }; n++; }
-  st.textContent = n ? `Filled head, shoulders, hips and hands at ${n} checkpoint${n > 1 ? 's' : ''}. Click the clubhead yourself at address and impact for shaft lean.` : 'Set checkpoints first (or use Auto-detect).';
+  st.textContent = n ? `Filled head, shoulders, hips and hands at ${n} checkpoint${n > 1 ? 's' : ''}. Click the clubhead yourself at P1, P6 and P7 for shaft lean and release.` : 'Set checkpoints first (or use Auto-detect).';
   azDraw();
 }
 function azTable() {
@@ -2991,9 +3196,10 @@ function azTable() {
       ['Shoulder tilt (lead side up +)', c => tiltOf(p.pts[c].shL, p.pts[c].shT), '°'],
       ['Hip tilt (lead side up +)', c => tiltOf(p.pts[c].hipL, p.pts[c].hipT), '°'],
       ['Shaft lean (hands ahead +)', c => { const H = p.pts[c].hands, C = p.pts[c].club; return H && C ? Math.atan2((H.x - C.x) * d, C.y - H.y) * R2D : null; }, '°'],
+      ['Lead arm–shaft angle (180° = in line)', c => azArmShaft(p, c), '°', true],
     ];
-    for (const [nm, f, unit] of der) { const v = cps.map(([c]) => f(c)); if (v.some(x => x != null)) rows.push([nm, v.map(x => x == null ? '–' : fmtSigned(x, 1) + unit)]); }
-    return `<h3 class="azh">${p.i ? 'Swing B' : 'Swing A'}${p.name ? ' · ' + p.name : ''}</h3><table class="tgt"><thead><tr><th></th>${cps.map(([, nm]) => `<th>${nm}</th>`).join('')}</tr></thead>
+    for (const [nm, f, unit, abs] of der) { const v = cps.map(([c]) => f(c)); if (v.some(x => x != null)) rows.push([nm, v.map(x => x == null ? '–' : (abs ? x.toFixed(0) : fmtSigned(x, 1)) + unit)]); }
+    return `<h3 class="azh">${p.i ? 'Swing B' : 'Swing A'}${p.name ? ' · ' + p.name : ''}</h3><table class="tgt"><thead><tr><th></th>${cps.map(([, nm, full]) => `<th title="${full}">${nm}</th>`).join('')}</tr></thead>
       <tbody>${rows.map(([nm, v]) => `<tr><td>${nm}</td>${v.map(x => `<td>${x}</td>`).join('')}</tr>`).join('')}</tbody></table>${azReport(p)}`;
   }).join('') + `<p class="hint">Movement is measured from the address position: → toward the target, ↑ up. Tilts and shaft lean assume a face-on camera. ${az.panes[0].scale ? '' : 'Set a scale to get inches.'}</p>`;
 }
@@ -3103,9 +3309,9 @@ function azBtns() {
 function azAlign() {
   const [A, B] = az.panes; if (!A.video || !B.video) return;
   const k = ['impact', 'address', 'top'].find(k => A.cps[k] != null && B.cps[k] != null);
-  if (!k) { az.msg = 'Set the impact checkpoint on both swings first, or scrub each swing to the same moment with its own bar.'; return azDraw(); }
+  if (!k) { az.msg = 'Set P7 (impact) on both swings first, or scrub each swing to the same moment with its own bar.'; return azDraw(); }
   azPause(); az.off = A.cps[k] - B.cps[k]; azSetTime(A.cps[k]);
-  az.msg = `Swings lined up at ${AZ_CP.find(c => c[0] === k)[1].toLowerCase()}. Play both keeps them in step.`; azDraw();
+  az.msg = `Swings lined up at ${azCpName(k)}. Play both keeps them in step.`; azDraw();
 }
 function azLoad(i, file) {
   const p = az.panes[i]; if (!file) return;
@@ -3158,7 +3364,7 @@ function azInit() {
   document.getElementById('azTools').innerHTML = AZ_TOOLS.map(([k, nm]) => `<button data-tool="${k}">${nm}</button>`).join('');
   document.getElementById('azColors').innerHTML = AZ_COLORS.map(c => `<button data-col="${c}" style="background:${c}"></button>`).join('');
   document.getElementById('azPts').innerHTML = AZ_PTS.map(([k, nm]) => `<button data-pt="${k}">${nm}</button>`).join('');
-  document.getElementById('azCps').innerHTML = AZ_CP.map(([k, nm]) => `<div class="azcp"><button data-cp="${k}">Set ${nm}</button><button data-go="${k}" title="Jump">→</button></div>`).join('');
+  document.getElementById('azCps').innerHTML = AZ_CP.map(([k, nm, full]) => `<div class="azcp"><button data-cp="${k}" title="${nm}: ${full}">Set ${nm} · ${full.replace(/, (backswing|downswing|follow-through)$/, (m, w) => ` (${w === 'follow-through' ? 'through' : w === 'backswing' ? 'back' : 'down'})`)}</button><button data-go="${k}" title="Jump">→</button></div>`).join('');
   document.querySelectorAll('#azTools [data-tool]').forEach(b => b.onclick = () => { az.tool = b.dataset.tool; az.draft = null; azSyncSide(); azDraw(); });
   document.querySelectorAll('#azColors [data-col]').forEach(b => b.onclick = () => { az.color = b.dataset.col; const s = az.sel && az.panes[az.sel.p].shapes[az.sel.k]; if (s && s.type !== 'scale') s.color = az.color; azSyncSide(); azDraw(); });
   document.querySelectorAll('#azPts [data-pt]').forEach(b => b.onclick = () => { az.ptName = b.dataset.pt; az.tool = 'point'; azSyncSide(); });
