@@ -1,0 +1,6 @@
+#!/bin/sh
+# Serve this folder locally. Usage: ./server [port]
+cd "$(dirname "$0")"
+PORT="${1:-8000}"
+echo "Serving at http://localhost:$PORT/swing-model.html"
+exec python3 -m http.server "$PORT"
